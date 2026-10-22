@@ -1,0 +1,94 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+Thumbs.db
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+*.bak
+*.tmp
+*.temp
+*.old
+
+# Scratch & Temporary generated files
+Gemini_Generated_Image_*
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code
+.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+**/build/
+/coverage/
+
+# Android build outputs & binaries
+*.apk
+*.aab
+*.ap_
+*.dex
+*.ipa
+/android/.gradle/
+**/android/.gradle/
+/android/app/debug
+/android/app/profile
+/android/app/release
+**/reports/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Environment secrets & credentials
+.env
+.env.*
+*.env
+env.json
+env.*.json
+*.local
+
+# Allow example / template environment files in git
+!.env.example
+!.env.example.json
+!env.example.json
+
+# Signing & secrets
+**/google-services.json
+**/key.properties
+**/local.properties
+**/*.jks
+**/*.jks.*
+**/*.keystore
+**/*.keystore.*
+**/*.p12
+**/*.pfx
+**/*.cer
+**/*.crt
+**/*.key
+**/*.pem
+
+# Local databases & dumps
+*.db
+*.sqlite
+*.sqlite3
+*.sql.dump
