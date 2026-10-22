@@ -222,3 +222,36 @@ create policy "Allow admins to manage assignments"
 
 create index if not exists idx_assignments_deadline on public.assignments(deadline);
 
+-- ===================================================================
+-- 8. STORAGE BUCKET SETUP (Vault - Lecture Notes & Attachments)
+-- ===================================================================
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'lecture-notes',
+  'lecture-notes',
+  true,
+  52428800, -- 50 MB limit (AppConfig.maxUploadBytes)
+  array['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+)
+on conflict (id) do update set
+  public = true,
+  file_size_limit = 52428800;
+
+-- Storage RLS Policies
+drop policy if exists "Public Read Access for Lecture Notes" on storage.objects;
+create policy "Public Read Access for Lecture Notes"
+  on storage.objects for select
+  using (bucket_id = 'lecture-notes');
+
+drop policy if exists "Uploader Upload Access to Lecture Notes" on storage.objects;
+create policy "Uploader Upload Access to Lecture Notes"
+  on storage.objects for insert
+  with check (bucket_id = 'lecture-notes');
+
+drop policy if exists "Uploader Delete Access to Lecture Notes" on storage.objects;
+create policy "Uploader Delete Access to Lecture Notes"
+  on storage.objects for delete
+  using (bucket_id = 'lecture-notes');
+
+
