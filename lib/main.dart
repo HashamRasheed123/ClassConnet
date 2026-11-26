@@ -6,6 +6,7 @@ import 'core/config/app_config.dart';
 import 'core/constants/kzynovex_branding.dart';
 import 'core/services/alert_scheduler.dart';
 import 'core/services/auth_service.dart';
+import 'core/services/offline_document_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/splash/splash_screen.dart';
 import 'repositories/class_repository.dart';
@@ -27,6 +28,9 @@ Future<void> main() async {
     }),
     AlertScheduler.instance.initialize().catchError((e) {
       debugPrint('AlertScheduler init skipped: $e');
+    }),
+    OfflineDocumentService.instance.ensureLoaded().catchError((e) {
+      debugPrint('OfflineDocumentService init skipped: $e');
     }),
     if (AppConfig.isSupabaseConfigured)
       Supabase.initialize(

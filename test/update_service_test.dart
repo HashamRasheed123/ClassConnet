@@ -6,8 +6,8 @@ void main() {
   group('UpdateService Model Tests', () {
     test('AppUpdateInfo parses relative download_url correctly', () {
       final json = {
-        'version_code': 2,
-        'version_name': '1.0.1',
+        'version_code': AppConfig.appVersionCode + 1,
+        'version_name': '1.0.2',
         'release_notes': 'Fixed timetable sync bugs',
         'is_mandatory': false,
         'download_url': '/api/v1/download/1',
@@ -18,8 +18,8 @@ void main() {
         'http://titan.portal.kzynovex.online',
       );
 
-      expect(info.versionCode, 2);
-      expect(info.versionName, '1.0.1');
+      expect(info.versionCode, AppConfig.appVersionCode + 1);
+      expect(info.versionName, '1.0.2');
       expect(info.releaseNotes, 'Fixed timetable sync bugs');
       expect(info.isMandatory, false);
       expect(info.rawDownloadUrl, '/api/v1/download/1');
@@ -32,7 +32,7 @@ void main() {
 
     test('AppUpdateInfo preserves absolute download_url', () {
       final json = {
-        'version_code': 3,
+        'version_code': AppConfig.appVersionCode + 2,
         'version_name': '1.1.0',
         'release_notes': 'Major update',
         'is_mandatory': true,
@@ -44,7 +44,7 @@ void main() {
         'http://titan.portal.kzynovex.online',
       );
 
-      expect(info.versionCode, 3);
+      expect(info.versionCode, AppConfig.appVersionCode + 2);
       expect(info.isMandatory, true);
       expect(
         info.resolvedDownloadUrl,

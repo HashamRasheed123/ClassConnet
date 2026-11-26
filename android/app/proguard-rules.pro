@@ -30,3 +30,25 @@
 -keep class kotlin.coroutines.** { *; }
 -keep class kotlinx.coroutines.** { *; }
 
+# ---------------------------------------------------------------------------
+# flutter_local_notifications: scheduled lecture alarms are serialized with Gson.
+# R8 strips generic signatures by default -> "Missing type parameter" and the
+# alarm is never scheduled / re-scheduled after reboot in RELEASE builds.
+# ---------------------------------------------------------------------------
+-keep class com.dexterous.** { *; }
+-keep class com.google.gson.** { *; }
+-keepattributes Signature
+-keep class * extends com.google.gson.TypeAdapter
+-keep class * implements com.google.gson.TypeAdapterFactory
+-keep class * implements com.google.gson.JsonSerializer
+-keep class * implements com.google.gson.JsonDeserializer
+-keepclassmembers,allowobfuscation class * {
+  @com.google.gson.annotations.SerializedName <fields>;
+}
+-keep,allowobfuscation,allowshrinking class com.google.gson.reflect.TypeToken
+-keep,allowobfuscation,allowshrinking class * extends com.google.gson.reflect.TypeToken
+-dontwarn com.google.gson.**
+
+# Custom MainActivity method channel
+-keep class com.softwareclass.softwareclass.** { *; }
+

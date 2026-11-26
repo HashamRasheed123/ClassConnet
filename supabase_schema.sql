@@ -15,9 +15,15 @@ create table if not exists public.users (
   credits integer not null default 30,
   streak_count integer not null default 1,
   is_kzynovex_verified boolean not null default false,
+  roll_no text,
+  can_upload boolean not null default false,
   avatar_url text,
   created_at timestamptz not null default now()
 );
+
+-- Ensure existing users table has new columns when migrating
+alter table public.users add column if not exists roll_no text;
+alter table public.users add column if not exists can_upload boolean not null default false;
 
 -- 2. SUBJECTS TABLE
 create table if not exists public.subjects (
@@ -57,6 +63,11 @@ create table if not exists public.daily_overrides (
   created_at timestamptz not null default now(),
   unique (slot_id, date)
 );
+
+-- Ensure existing daily_overrides table has time & date shift columns when migrating
+alter table public.daily_overrides add column if not exists actual_start_time time;
+alter table public.daily_overrides add column if not exists actual_end_time time;
+alter table public.daily_overrides add column if not exists rescheduled_date date;
 
 -- 5. RESOURCES (VAULT) TABLE
 create table if not exists public.resources (
@@ -221,6 +232,34 @@ create policy "Allow admins to manage assignments"
   with check (true);
 
 create index if not exists idx_assignments_deadline on public.assignments(deadline);
+
+-- ===================================================================
+-- 8. QUIZZES TABLE (Optional Dedicated Table; app also auto-syncs via public.resources ccquiz://)
+-- ===================================================================
+create table if not exists public.quizzes (
+  id uuid primary key default uuid_generate_v4(),
+  subject_id uuid references public.subjects(id) on delete cascade,
+  title text not null,
+  description text default '',
+  source_url text,
+  questions jsonb not null default '[]'::jsonb,
+  created_by text default 'Admin',
+  created_at timestamptz not null default now()
+);
+
+alter table public.quizzes enable row level security;
+
+drop policy if exists "Allow public read access to quizzes" on public.quizzes;
+create policy "Allow public read access to quizzes"
+  on public.quizzes for select
+  using (true);
+
+drop policy if exists "Allow admins to manage quizzes" on public.quizzes;
+create policy "Allow admins to manage quizzes"
+  on public.quizzes for all
+  using (true)
+  with check (true);
+
 
 -- ===================================================================
 -- 8. STORAGE BUCKET SETUP (Vault - Lecture Notes & Attachments)

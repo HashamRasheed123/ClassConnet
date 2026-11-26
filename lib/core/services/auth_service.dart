@@ -108,7 +108,17 @@ class AuthService {
       final raw = prefs.getString(_keyActiveSession);
       if (raw != null && raw.isNotEmpty) {
         final map = jsonDecode(raw) as Map<String, dynamic>;
-        final user = UserModel.fromMap(map);
+        var user = UserModel.fromMap(map);
+        // Auto-elevate if user's email is in the designated admin list
+        if (isAdminEmail(user.email) && (!user.isAdmin || !user.canUpload)) {
+          user = user.copyWith(
+            role: 'admin',
+            canUpload: true,
+            uploadRequestStatus: 'approved',
+            isKzynovexVerified: true,
+          );
+          await _saveActiveSession(user);
+        }
         _currentSession = user;
         return user;
       }
@@ -441,40 +451,106 @@ class AuthService {
     return true;
   }
 
+  /// Finds the registry key for a user by rollNo, email, or userId.
+  String? _findRegistryKey(
+    Map<String, Map<String, dynamic>> registry, {
+    String? rollNo,
+    String? email,
+    String? userId,
+  }) {
+    final cleanRoll = _normalizeRoll(rollNo ?? '');
+    final cleanEmail = (email ?? '').trim().toLowerCase();
+    final cleanId = (userId ?? '').trim();
+
+    if (cleanRoll.isNotEmpty && registry.containsKey(cleanRoll)) {
+      return cleanRoll;
+    }
+    if (cleanEmail.isNotEmpty) {
+      if (registry.containsKey(cleanEmail)) return cleanEmail;
+      if (registry.containsKey('GOOGLE-$cleanEmail')) {
+        return 'GOOGLE-$cleanEmail';
+      }
+    }
+    if (cleanId.isNotEmpty && registry.containsKey(cleanId)) {
+      return cleanId;
+    }
+
+    for (final entry in registry.entries) {
+      final map = entry.value;
+      final recId = (map['id'] as String? ?? '').trim();
+      final recRoll = _normalizeRoll(map['roll_no'] as String? ?? '');
+      final recEmail = (map['email'] as String? ?? '').trim().toLowerCase();
+      final recGoogle =
+          (map['google_email'] as String? ?? '').trim().toLowerCase();
+
+      if (cleanId.isNotEmpty && recId == cleanId) return entry.key;
+      if (cleanRoll.isNotEmpty && recRoll == cleanRoll) return entry.key;
+      if (cleanEmail.isNotEmpty &&
+          (recEmail == cleanEmail || recGoogle == cleanEmail)) {
+        return entry.key;
+      }
+      // Also allow matching when `rollNo` parameter was passed an email or userId
+      if (cleanRoll.isNotEmpty) {
+        final rawLower = (rollNo ?? '').trim().toLowerCase();
+        if (recEmail == rawLower ||
+            recGoogle == rawLower ||
+            recId.toLowerCase() == rawLower) {
+          return entry.key;
+        }
+      }
+    }
+    return null;
+  }
+
   /// Admin function: Reset PIN for a student who forgot it
   Future<bool> adminResetStudentPin({
     required String rollNo,
     required String newPin,
   }) async {
-    final cleanRoll = _normalizeRoll(rollNo);
     final registry = await _loadRegistry();
-    if (!registry.containsKey(cleanRoll)) return false;
+    final key = _findRegistryKey(registry, rollNo: rollNo, email: rollNo, userId: rollNo);
+    if (key == null) return false;
 
-    registry[cleanRoll]!['pin_hash'] = _hashPin(newPin.trim());
+    registry[key]!['pin_hash'] = _hashPin(newPin.trim());
     await _saveRegistry(registry);
     return true;
   }
 
-  /// Seed designated admin accounts into registry if empty
+  /// Seed designated admin accounts into registry and ensure all designated
+  /// admin emails have full admin privileges even if registry was already populated.
   Future<void> seedDefaultAccountsIfEmpty() async {
-    final registry = await _loadRegistry();
-    if (registry.isNotEmpty) return;
-
     final adminList = AppConfig.adminEmails;
     if (adminList.isEmpty) return;
 
+    final registry = await _loadRegistry();
     final pass = AppConfig.adminPassword.isNotEmpty
         ? AppConfig.adminPassword
         : 'admin';
 
+    bool changed = false;
     for (int i = 0; i < adminList.length; i++) {
-      final email = adminList[i];
+      final email = adminList[i].trim().toLowerCase();
+      if (email.isEmpty) continue;
+
+      final existingKey = _findRegistryKey(registry, email: email);
+      if (existingKey != null) {
+        final existing = registry[existingKey]!;
+        if (existing['role'] != 'admin' || existing['can_upload'] != true) {
+          existing['role'] = 'admin';
+          existing['can_upload'] = true;
+          existing['upload_request_status'] = 'approved';
+          existing['is_kzynovex_verified'] = true;
+          changed = true;
+        }
+        continue;
+      }
+
       final username = email.split('@').first;
       final capitalized = username.isNotEmpty
           ? '${username[0].toUpperCase()}${username.substring(1)}'
           : 'Admin';
       final adminUser = UserModel(
-        id: 'admin-${i + 1}',
+        id: UuidUtil.fromString('admin-$email'),
         name: 'Admin $capitalized',
         email: email,
         role: 'admin',
@@ -493,14 +569,93 @@ class AuthService {
         'google_email': email,
         'registered_at': DateTime.now().toIso8601String(),
       };
+      changed = true;
     }
-    await _saveRegistry(registry);
+    if (changed) {
+      await _saveRegistry(registry);
+    }
   }
 
   /// Get list of registered users as UserModels (for Admin user management)
   Future<List<UserModel>> getAllUsers() async {
     await seedDefaultAccountsIfEmpty();
     final registry = await _loadRegistry();
+
+    if (_isSupabaseActive) {
+      try {
+        final rows = await Supabase.instance.client
+            .from('users')
+            .select()
+            .timeout(const Duration(seconds: 4));
+        bool changed = false;
+        for (final raw in (rows as List)) {
+          final remote = Map<String, dynamic>.from(raw as Map);
+          final remoteId = remote['id']?.toString() ?? '';
+          final remoteEmail =
+              (remote['email'] as String? ?? '').trim().toLowerCase();
+          final remoteRoll = remote['roll_no'] as String?;
+          final isDesignatedAdmin = isAdminEmail(remoteEmail);
+          final existingKey = _findRegistryKey(
+            registry,
+            rollNo: remoteRoll,
+            email: remoteEmail,
+            userId: remoteId,
+          );
+          if (existingKey != null) {
+            final existing = registry[existingKey]!;
+            existing['id'] = remoteId.isNotEmpty ? remoteId : existing['id'];
+            existing['name'] = remote['name'] ?? existing['name'];
+            existing['email'] = remote['email'] ?? existing['email'];
+            existing['role'] = isDesignatedAdmin
+                ? 'admin'
+                : (remote['role'] ?? existing['role']);
+            existing['credits'] = remote['credits'] ?? existing['credits'];
+            existing['streak_count'] =
+                remote['streak_count'] ?? existing['streak_count'];
+            existing['is_kzynovex_verified'] = isDesignatedAdmin ||
+                (remote['is_kzynovex_verified'] ??
+                    existing['is_kzynovex_verified']);
+            if (isDesignatedAdmin) {
+              existing['can_upload'] = true;
+              existing['upload_request_status'] = 'approved';
+            } else if (remote['can_upload'] != null) {
+              existing['can_upload'] = remote['can_upload'];
+            }
+            changed = true;
+          } else {
+            final newKey = (remoteRoll != null && remoteRoll.trim().isNotEmpty)
+                ? _normalizeRoll(remoteRoll)
+                : (remoteEmail.isNotEmpty
+                    ? 'GOOGLE-$remoteEmail'
+                    : (remoteId.isNotEmpty ? remoteId : UuidUtil.generate()));
+            final canUp =
+                isDesignatedAdmin || (remote['can_upload'] == true);
+            registry[newKey] = {
+              'id': remoteId.isNotEmpty ? remoteId : UuidUtil.generate(),
+              'name': remote['name'] ?? 'Student',
+              'email': remote['email'] ?? '',
+              'role': isDesignatedAdmin
+                  ? 'admin'
+                  : (remote['role'] ?? 'student'),
+              'roll_no': remoteRoll,
+              'credits': remote['credits'] ?? (isDesignatedAdmin ? 500 : 50),
+              'streak_count': remote['streak_count'] ?? 1,
+              'is_kzynovex_verified':
+                  isDesignatedAdmin || (remote['is_kzynovex_verified'] ?? true),
+              'can_upload': canUp,
+              'upload_request_status': canUp ? 'approved' : 'none',
+            };
+            changed = true;
+          }
+        }
+        if (changed) {
+          await _saveRegistry(registry);
+        }
+      } catch (e) {
+        debugPrint('Supabase remote users fetch skipped: $e');
+      }
+    }
+
     final list = registry.values.map((map) => UserModel.fromMap(map)).toList();
     list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return list;
@@ -580,48 +735,77 @@ class AuthService {
   /// Admin function: Update user profile and optionally change role/credits/PIN
   Future<bool> adminUpdateUser(UserModel user, {String? newPin}) async {
     final cleanRoll = _normalizeRoll(user.rollNo ?? '');
-    if (cleanRoll.isEmpty) return false;
-
     final registry = await _loadRegistry();
-    if (!registry.containsKey(cleanRoll)) return false;
+    final key = _findRegistryKey(
+      registry,
+      rollNo: user.rollNo,
+      email: user.email,
+      userId: user.id,
+    );
 
-    final existing = registry[cleanRoll]!;
+    final targetKey = key ??
+        (cleanRoll.isNotEmpty
+            ? cleanRoll
+            : (user.email.trim().isNotEmpty
+                ? 'GOOGLE-${user.email.trim().toLowerCase()}'
+                : user.id));
+    if (targetKey.isEmpty) return false;
+
+    final existing = registry[targetKey] ?? <String, dynamic>{'id': user.id};
+    existing['id'] = user.id.isNotEmpty ? user.id : (existing['id'] ?? UuidUtil.generate());
     existing['name'] = user.name.trim();
     existing['email'] = user.email.trim();
     existing['role'] = user.role;
+    if (cleanRoll.isNotEmpty) {
+      existing['roll_no'] = cleanRoll;
+    }
     existing['credits'] = user.credits;
     existing['streak_count'] = user.streakCount;
     existing['is_kzynovex_verified'] = user.isKzynovexVerified;
+    existing['can_upload'] = user.canUpload;
+    existing['upload_request_status'] = user.uploadRequestStatus;
     if (newPin != null && newPin.trim().isNotEmpty) {
       existing['pin_hash'] = _hashPin(newPin.trim());
     }
+    registry[targetKey] = existing;
 
     await _saveRegistry(registry);
 
-    if (user.role == 'admin') {
-      await addAdminToWhitelist(cleanRoll);
-    } else if (cleanRoll != '23-SE-402') {
-      await removeAdminFromWhitelist(cleanRoll);
+    if (cleanRoll.isNotEmpty) {
+      if (user.role == 'admin') {
+        await addAdminToWhitelist(cleanRoll);
+      } else if (cleanRoll != '23-SE-402') {
+        await removeAdminFromWhitelist(cleanRoll);
+      }
     }
 
     // If active session belongs to this user, update active session
     final currentSession = await getActiveSession();
-    if (currentSession != null && _normalizeRoll(currentSession.rollNo ?? '') == cleanRoll) {
-      await _saveActiveSession(user);
+    if (currentSession != null) {
+      final sameId = currentSession.id == user.id;
+      final sameRoll = cleanRoll.isNotEmpty &&
+          _normalizeRoll(currentSession.rollNo ?? '') == cleanRoll;
+      final sameEmail = user.email.trim().isNotEmpty &&
+          currentSession.email.trim().toLowerCase() ==
+              user.email.trim().toLowerCase();
+      if (sameId || sameRoll || sameEmail) {
+        await _saveActiveSession(user);
+      }
     }
 
     if (_isSupabaseActive) {
       try {
         final client = Supabase.instance.client;
         await client.from('users').upsert({
-          'id': user.id,
+          'id': UuidUtil.fromString(user.id),
           'name': user.name,
           'email': user.email,
           'role': user.role,
           'credits': user.credits,
           'streak_count': user.streakCount,
           'is_kzynovex_verified': user.isKzynovexVerified,
-        });
+          'can_upload': user.canUpload,
+        }).timeout(const Duration(seconds: 4));
       } catch (e) {
         debugPrint('Supabase remote sync skipped: $e');
       }
@@ -632,25 +816,40 @@ class AuthService {
 
   /// Admin function: Delete/unclaim user account
   Future<bool> adminDeleteUser(String rollNo) async {
-    final cleanRoll = _normalizeRoll(rollNo);
     final registry = await _loadRegistry();
-    if (!registry.containsKey(cleanRoll)) return false;
+    final key = _findRegistryKey(
+      registry,
+      rollNo: rollNo,
+      email: rollNo,
+      userId: rollNo,
+    );
+    if (key == null) return false;
 
-    final removed = registry.remove(cleanRoll);
+    final removed = registry.remove(key);
     await _saveRegistry(registry);
 
     // If currently logged in as this student, log out
     final currentSession = await getActiveSession();
-    if (currentSession != null && _normalizeRoll(currentSession.rollNo ?? '') == cleanRoll) {
-      await logout();
+    if (currentSession != null) {
+      final removedId = removed?['id']?.toString() ?? '';
+      final cleanRoll = _normalizeRoll(rollNo);
+      if ((removedId.isNotEmpty && currentSession.id == removedId) ||
+          (cleanRoll.isNotEmpty &&
+              _normalizeRoll(currentSession.rollNo ?? '') == cleanRoll)) {
+        await logout();
+      }
     }
 
     if (_isSupabaseActive && removed != null) {
       try {
         final userId = removed['id'] as String?;
-        if (userId != null) {
+        if (userId != null && userId.isNotEmpty) {
           final client = Supabase.instance.client;
-          await client.from('users').delete().eq('id', userId);
+          await client
+              .from('users')
+              .delete()
+              .eq('id', UuidUtil.fromString(userId))
+              .timeout(const Duration(seconds: 4));
         }
       } catch (e) {
         debugPrint('Supabase user delete skipped: $e');
@@ -745,7 +944,14 @@ class AuthService {
       streakCount: (existingRecord?['streak_count'] as num?)?.toInt() ?? 1,
       isKzynovexVerified: isAdmin || (existingRecord?['is_kzynovex_verified'] as bool? ?? true),
       avatarUrl: avatarUrl ?? existingRecord?['avatar_url'] as String?,
-      rollNo: rollNo ?? (isAdmin ? (cleanEmail.contains('fanhacker') ? 'ADMIN-FAN' : 'ADMIN-KZY') : null),
+      rollNo: rollNo ??
+          (isAdmin
+              ? (cleanEmail.contains('fanhacker')
+                  ? 'ADMIN-FAN'
+                  : (cleanEmail.contains('muzammil')
+                      ? 'ADMIN-MUZ'
+                      : 'ADMIN-KZY'))
+              : null),
       isLoggedIn: true,
       canUpload: canUpload,
       uploadRequestStatus: uploadStatus,

@@ -1,23 +1,16 @@
 # Privacy Policy for Class Connect
-
 **Effective Date:** October 21, 2026  
 **Developer / Author:** Hasham Rasheed (Kzynovex)  
 **Website:** [https://kzynovex.online](https://kzynovex.online)  
 **Contact Email:** kzynovexinc@gmail.com  
 **Application:** Class Connect (Academic Companion & Lecture Timetable Hub)
-
 ---
-
 ## 1. Introduction & Sole Educational Purpose
 Class Connect is an academic utility application developed exclusively for educational purposes as a class project. It helps students track weekly lecture timetables, receive real-time schedule change alerts, and exchange verified study notes. 
-
 We respect your privacy and are committed to maintaining the highest level of transparency regarding what information we collect and how it is used.
-
 ---
-
 ## 2. Information We Collect
 We collect the absolute minimum data required to deliver core educational functionality:
-
 1. **Google Account Information**:
    - **Full Name** & **Google Email**: Retrieved via official Google OAuth 2.0 when you sign in, used exclusively to create your student session and display your identity on class notes.
    - **Profile Photo (optional)**: Displayed locally in your student profile card.

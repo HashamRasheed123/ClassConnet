@@ -6,6 +6,7 @@ import '../../core/utils/formatters.dart';
 import '../../core/utils/uuid_util.dart';
 import '../../models/models.dart';
 import '../../providers/class_providers.dart';
+import '../quizzes/quiz_center_screen.dart';
 
 class AdminManagementScreen extends ConsumerStatefulWidget {
   final int initialTabIndex;
@@ -53,9 +54,9 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 6,
+      length: 7,
       vsync: this,
-      initialIndex: widget.initialTabIndex.clamp(0, 5),
+      initialIndex: widget.initialTabIndex.clamp(0, 6),
     );
     final today = DateTime.now().weekday;
     if (today >= 1 && today <= 7) {
@@ -82,6 +83,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     final users = ref.watch(usersListProvider);
     final uploaderRequests = ref.watch(uploaderRequestsProvider);
     final pendingReqCount = ref.watch(pendingUploaderRequestsCountProvider);
+    final quizzes = ref.watch(quizzesProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -279,6 +281,15 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     ],
                   ),
                 ),
+                Tab(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.psychology_alt_rounded, size: 16),
+                      const SizedBox(width: 6),
+                      Text('Quizzes (${quizzes.length})'),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -304,6 +315,9 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
 
           // TAB 6: Users & Students Roster Manager
           _buildUsersManager(users),
+
+          // TAB 7: NotebookLM & MCQ Quizzes Manager
+          const QuizCenterScreen(embeddedInAdmin: true),
         ],
       ),
     );
@@ -927,6 +941,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     String endTime = existingSlot?.endTime ?? '10:15';
     final roomController =
         TextEditingController(text: existingSlot?.defaultRoom ?? 'Hall A-102');
+    final meetingUrlController =
+        TextEditingController(text: existingSlot?.meetingUrl ?? '');
 
     showModalBottomSheet(
       context: context,
@@ -1240,6 +1256,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         'Lab 3 (Ground Floor)',
                         'Seminar Room 4',
                         'Room 204',
+                        'Online Class',
                       ].map((r) {
                         return ActionChip(
                           label: Text(r, style: const TextStyle(fontSize: 11)),
@@ -1249,6 +1266,34 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         );
                       }).toList(),
                     ),
+                    const SizedBox(height: 14),
+
+                    // Meeting / Online Class URL (Optional)
+                    const Text(
+                      'Meeting / Online Class URL (Optional)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: meetingUrlController,
+                      keyboardType: TextInputType.url,
+                      decoration: InputDecoration(
+                        hintText:
+                            'e.g. https://meet.google.com/abc-defg-hij or Zoom link',
+                        prefixIcon:
+                            const Icon(Icons.video_call_rounded, size: 20),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 20),
 
                     // Save Button
@@ -1256,8 +1301,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton(
-                        onPressed: () {
+                        onPressed: () async {
                           final roomText = roomController.text.trim();
+                          final meetingUrlText =
+                              meetingUrlController.text.trim();
                           if (roomText.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -1266,6 +1313,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                             return;
                           }
 
+                          String? error;
                           if (isEditing) {
                             final updated = existingSlot.copyWith(
                               subjectId: selectedSubjectId,
@@ -1273,14 +1321,14 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                               startTime: startTime,
                               endTime: endTime,
                               defaultRoom: roomText,
+                              meetingUrl: meetingUrlText.isNotEmpty
+                                  ? meetingUrlText
+                                  : null,
+                              clearMeetingUrl: meetingUrlText.isEmpty,
                             );
-                            ref
+                            error = await ref
                                 .read(timetableSlotsProvider.notifier)
                                 .updateSlot(updated);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Timetable slot updated!')),
-                            );
                           } else {
                             final newSlot = TimetableSlotModel(
                               id: UuidUtil.generate(),
@@ -1289,17 +1337,31 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                               startTime: startTime,
                               endTime: endTime,
                               defaultRoom: roomText,
+                              meetingUrl: meetingUrlText.isNotEmpty
+                                  ? meetingUrlText
+                                  : null,
                             );
-                            ref
+                            error = await ref
                                 .read(timetableSlotsProvider.notifier)
                                 .addSlot(newSlot);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('New slot added to timetable!')),
-                            );
                           }
 
-                          Navigator.pop(ctx);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                error == null
+                                    ? (isEditing
+                                        ? 'Timetable slot updated & synced to cloud!'
+                                        : 'New slot added & synced to cloud!')
+                                    : 'Saved locally (Cloud: $error)',
+                              ),
+                              backgroundColor: error == null
+                                  ? AppColors.success
+                                  : AppColors.warning,
+                            ),
+                          );
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
@@ -1740,17 +1802,32 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     return (m >= 1 && m <= 12) ? months[m - 1] : '';
   }
 
+  DateTime _upcomingDateForWeekday(int targetWeekday) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final diff = (targetWeekday - today.weekday) % 7;
+    return today.add(Duration(days: diff));
+  }
+
   void _openQuickOverrideDialog(
     BuildContext context,
     TimetableSlotModel slot,
-    SubjectModel subject,
-  ) {
-    final roomController = TextEditingController(text: slot.defaultRoom);
+    SubjectModel subject, {
+    List<TimetableSlotModel>? selectableSlots,
+    List<SubjectModel>? allSubjects,
+  }) {
+    TimetableSlotModel currentSlot = slot;
+    SubjectModel currentSubject = subject;
+    final roomController = TextEditingController(text: currentSlot.defaultRoom);
+    final meetingUrlController =
+        TextEditingController(text: currentSlot.meetingUrl ?? '');
     final topicController = TextEditingController();
     OverrideStatus status = OverrideStatus.rescheduled;
-    String startTime = slot.startTime;
-    String endTime = slot.endTime;
-    DateTime selectedDate = DateTime.now();
+    String startTime = Formatters.normalizeTime(currentSlot.startTime);
+    String endTime = Formatters.normalizeTime(currentSlot.endTime);
+    DateTime originDate = _upcomingDateForWeekday(currentSlot.dayOfWeek);
+    DateTime selectedDate = originDate;
+    bool updatePermanentSlot = false;
 
     showModalBottomSheet(
       context: context,
@@ -1788,7 +1865,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     const SizedBox(height: 16),
 
                     Text(
-                      'Direct Broadcast: ${subject.code}',
+                      'Direct Broadcast: ${currentSubject.code}',
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
@@ -1796,11 +1873,79 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       ),
                     ),
                     Text(
-                      'Regular: ${slot.formattedTimeRange} • ${slot.defaultRoom}',
+                      'Regular (${_dayNameFromWeekday(currentSlot.dayOfWeek)}): ${currentSlot.formattedTimeRange} • ${currentSlot.defaultRoom}',
                       style: const TextStyle(
                           fontSize: 12, color: AppColors.textSecondary),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+
+                    if (selectableSlots != null &&
+                        selectableSlots.length > 1) ...[
+                      const Text(
+                        'Select Lecture Slot',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: currentSlot.id,
+                            isExpanded: true,
+                            items: selectableSlots.map((s) {
+                              final sub = allSubjects != null
+                                  ? (resolveSubjectById(
+                                          allSubjects, s.subjectId) ??
+                                      currentSubject)
+                                  : currentSubject;
+                              return DropdownMenuItem(
+                                value: s.id,
+                                child: Text(
+                                  '${sub.code} (${_dayNameFromWeekday(s.dayOfWeek)} ${s.formattedStartTime}) • ${s.defaultRoom}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (newId) {
+                              if (newId == null) return;
+                              final pickedSlot = selectableSlots
+                                  .firstWhere((s) => s.id == newId);
+                              final pickedSub = allSubjects != null
+                                  ? (resolveSubjectById(
+                                          allSubjects, pickedSlot.subjectId) ??
+                                      currentSubject)
+                                  : currentSubject;
+                              setModalState(() {
+                                currentSlot = pickedSlot;
+                                currentSubject = pickedSub;
+                                roomController.text = pickedSlot.defaultRoom;
+                                meetingUrlController.text =
+                                    pickedSlot.meetingUrl ?? '';
+                                startTime = Formatters.normalizeTime(
+                                    pickedSlot.startTime);
+                                endTime = Formatters.normalizeTime(
+                                    pickedSlot.endTime);
+                                originDate = _upcomingDateForWeekday(
+                                    pickedSlot.dayOfWeek);
+                                selectedDate = originDate;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
 
                     const Text(
                       'Action Type',
@@ -1871,8 +2016,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           final picked = await showDatePicker(
                             context: context,
                             initialDate: selectedDate,
-                            firstDate: DateTime.now().subtract(const Duration(days: 7)),
-                            lastDate: DateTime.now().add(const Duration(days: 90)),
+                            firstDate:
+                                DateTime.now().subtract(const Duration(days: 7)),
+                            lastDate:
+                                DateTime.now().add(const Duration(days: 90)),
                           );
                           if (picked != null) {
                             setModalState(() => selectedDate = picked);
@@ -1880,7 +2027,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         },
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
                           decoration: BoxDecoration(
                             color: const Color(0xFFF8FAFC),
                             borderRadius: BorderRadius.circular(12),
@@ -1888,7 +2036,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
+                              const Icon(Icons.calendar_today_rounded,
+                                  size: 18, color: AppColors.primary),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
@@ -1900,7 +2049,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                   ),
                                 ),
                               ),
-                              const Icon(Icons.arrow_drop_down_rounded, color: AppColors.textSecondary),
+                              const Icon(Icons.arrow_drop_down_rounded,
+                                  color: AppColors.textSecondary),
                             ],
                           ),
                         ),
@@ -1920,21 +2070,20 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                   labelStyle: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
-                                    color: selectedDate.weekday == (d['day'] as int)
+                                    color: selectedDate.weekday ==
+                                            (d['day'] as int)
                                         ? Colors.white
                                         : AppColors.textPrimary,
                                   ),
-                                  backgroundColor: selectedDate.weekday == (d['day'] as int)
-                                      ? AppColors.primary
-                                      : const Color(0xFFF1F5F9),
+                                  backgroundColor:
+                                      selectedDate.weekday == (d['day'] as int)
+                                          ? AppColors.primary
+                                          : const Color(0xFFF1F5F9),
                                   onPressed: () {
                                     final targetW = d['day'] as int;
-                                    final now = DateTime.now();
-                                    int diff = targetW - now.weekday;
-                                    if (diff < 0) diff += 7;
                                     setModalState(() {
-                                      selectedDate = DateTime(now.year, now.month, now.day)
-                                          .add(Duration(days: diff));
+                                      selectedDate =
+                                          _upcomingDateForWeekday(targetW);
                                     });
                                   },
                                 ),
@@ -1958,20 +2107,30 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           Expanded(
                             child: InkWell(
                               onTap: () async {
-                                final parts = startTime.split(':').map(int.parse).toList();
+                                final norm = Formatters.normalizeTime(startTime);
+                                final parts = (norm.isNotEmpty ? norm : '09:00')
+                                    .split(':');
                                 final picked = await showTimePicker(
                                   context: context,
-                                  initialTime: TimeOfDay(hour: parts[0], minute: parts[1]),
+                                  initialTime: TimeOfDay(
+                                    hour: int.tryParse(parts[0]) ?? 9,
+                                    minute: parts.length > 1
+                                        ? (int.tryParse(parts[1]) ?? 0)
+                                        : 0,
+                                  ),
                                 );
                                 if (picked != null) {
-                                  final h = picked.hour.toString().padLeft(2, '0');
-                                  final m = picked.minute.toString().padLeft(2, '0');
+                                  final h =
+                                      picked.hour.toString().padLeft(2, '0');
+                                  final m =
+                                      picked.minute.toString().padLeft(2, '0');
                                   setModalState(() => startTime = '$h:$m');
                                 }
                               },
                               borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 12),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFF8FAFC),
                                   borderRadius: BorderRadius.circular(12),
@@ -1979,13 +2138,25 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.access_time_rounded, size: 18, color: AppColors.primary),
+                                    const Icon(Icons.access_time_rounded,
+                                        size: 18, color: AppColors.primary),
                                     const SizedBox(width: 8),
                                     Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        const Text('Start Time', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                                        Text(Formatters.formatTimeString(startTime), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                                        const Text('Start Time',
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                color:
+                                                    AppColors.textSecondary)),
+                                        Text(
+                                            Formatters.formatTimeString(
+                                                startTime),
+                                            style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppColors.textPrimary)),
                                       ],
                                     ),
                                   ],
@@ -1997,20 +2168,30 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           Expanded(
                             child: InkWell(
                               onTap: () async {
-                                final parts = endTime.split(':').map(int.parse).toList();
+                                final norm = Formatters.normalizeTime(endTime);
+                                final parts = (norm.isNotEmpty ? norm : '10:00')
+                                    .split(':');
                                 final picked = await showTimePicker(
                                   context: context,
-                                  initialTime: TimeOfDay(hour: parts[0], minute: parts[1]),
+                                  initialTime: TimeOfDay(
+                                    hour: int.tryParse(parts[0]) ?? 10,
+                                    minute: parts.length > 1
+                                        ? (int.tryParse(parts[1]) ?? 0)
+                                        : 0,
+                                  ),
                                 );
                                 if (picked != null) {
-                                  final h = picked.hour.toString().padLeft(2, '0');
-                                  final m = picked.minute.toString().padLeft(2, '0');
+                                  final h =
+                                      picked.hour.toString().padLeft(2, '0');
+                                  final m =
+                                      picked.minute.toString().padLeft(2, '0');
                                   setModalState(() => endTime = '$h:$m');
                                 }
                               },
                               borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 12),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFF8FAFC),
                                   borderRadius: BorderRadius.circular(12),
@@ -2018,13 +2199,24 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.schedule_rounded, size: 18, color: AppColors.warning),
+                                    const Icon(Icons.schedule_rounded,
+                                        size: 18, color: AppColors.warning),
                                     const SizedBox(width: 8),
                                     Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        const Text('End Time', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                                        Text(Formatters.formatTimeString(endTime), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                                        const Text('End Time',
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                color:
+                                                    AppColors.textSecondary)),
+                                        Text(
+                                            Formatters.formatTimeString(endTime),
+                                            style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppColors.textPrimary)),
                                       ],
                                     ),
                                   ],
@@ -2054,11 +2246,60 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           fillColor: const Color(0xFFF8FAFC),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.border),
+                            borderSide:
+                                const BorderSide(color: AppColors.border),
                           ),
                         ),
                       ),
                       const SizedBox(height: 14),
+
+                      // Meeting / Online Class URL (Optional)
+                      const Text(
+                        'Meeting / Online Class URL (Optional)',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: meetingUrlController,
+                        keyboardType: TextInputType.url,
+                        decoration: InputDecoration(
+                          hintText:
+                              'e.g. https://meet.google.com/... or Zoom link',
+                          prefixIcon:
+                              const Icon(Icons.video_call_rounded, size: 20),
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                const BorderSide(color: AppColors.border),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Option to also update the permanent weekly slot
+                      CheckboxListTile(
+                        value: updatePermanentSlot,
+                        onChanged: (val) => setModalState(
+                            () => updatePermanentSlot = val ?? false),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        activeColor: AppColors.primary,
+                        title: const Text(
+                          'Also update permanent weekly timetable slot',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
                     ],
 
                     const Text(
@@ -2089,38 +2330,87 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton(
-                        onPressed: () {
-                          ref
+                        onPressed: () async {
+                          final newRoom = roomController.text.trim().isNotEmpty
+                              ? roomController.text.trim()
+                              : currentSlot.defaultRoom;
+                          final meetingUrlText =
+                              meetingUrlController.text.trim();
+
+                          if (status == OverrideStatus.rescheduled &&
+                              updatePermanentSlot) {
+                            await ref
+                                .read(timetableSlotsProvider.notifier)
+                                .updateSlot(
+                                  currentSlot.copyWith(
+                                    dayOfWeek: selectedDate.weekday,
+                                    startTime: startTime,
+                                    endTime: endTime,
+                                    defaultRoom: newRoom,
+                                    meetingUrl: meetingUrlText.isNotEmpty
+                                        ? meetingUrlText
+                                        : null,
+                                    clearMeetingUrl: meetingUrlText.isEmpty,
+                                  ),
+                                );
+                          }
+
+                          final error = await ref
                               .read(dailyOverridesProvider.notifier)
                               .setDirectOverride(
-                                slotId: slot.id,
+                                slotId: currentSlot.id,
                                 status: status,
-                                date: selectedDate,
-                                actualRoom: status == OverrideStatus.rescheduled
-                                    ? roomController.text.trim()
-                                    : null,
-                                actualStartTime: status == OverrideStatus.rescheduled
-                                    ? startTime
-                                    : null,
-                                actualEndTime: status == OverrideStatus.rescheduled
-                                    ? endTime
-                                    : null,
-                                rescheduledDate: status == OverrideStatus.rescheduled
+                                date: status == OverrideStatus.cancelled
                                     ? selectedDate
+                                    : originDate,
+                                actualRoom: status == OverrideStatus.rescheduled
+                                    ? newRoom
                                     : null,
-                                topicCovered: topicController.text.trim().isNotEmpty
-                                    ? topicController.text.trim()
+                                actualStartTime:
+                                    status == OverrideStatus.rescheduled
+                                        ? startTime
+                                        : null,
+                                actualEndTime:
+                                    status == OverrideStatus.rescheduled
+                                        ? endTime
+                                        : null,
+                                rescheduledDate:
+                                    status == OverrideStatus.rescheduled
+                                        ? selectedDate
+                                        : null,
+                                meetingUrl: status == OverrideStatus.rescheduled &&
+                                        meetingUrlText.isNotEmpty
+                                    ? meetingUrlText
                                     : null,
+                                topicCovered:
+                                    topicController.text.trim().isNotEmpty
+                                        ? topicController.text.trim()
+                                        : null,
                               );
 
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(status == OverrideStatus.cancelled
-                                  ? 'Cancelled lecture broadcasted to class!'
-                                  : 'Lecture rescheduled (${Formatters.formatTimeRangeString(startTime, endTime)}) & broadcasted!'),
-                            ),
-                          );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (!context.mounted) return;
+
+                          final successMsg = status == OverrideStatus.cancelled
+                              ? 'Cancelled lecture broadcasted to class!'
+                              : 'Lecture rescheduled (${Formatters.formatTimeRangeString(startTime, endTime)}) & broadcasted!';
+
+                          if (error == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(successMsg),
+                                backgroundColor: AppColors.success,
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('$successMsg (Cloud: $error)'),
+                                backgroundColor: AppColors.warning,
+                                duration: const Duration(seconds: 4),
+                              ),
+                            );
+                          }
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: status == OverrideStatus.cancelled
@@ -2155,13 +2445,28 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
   ) {
     if (slots.isEmpty) return;
 
-    TimetableSlotModel selectedSlot = slots.first;
-    SubjectModel subject = subjects.firstWhere(
-      (s) => s.id == selectedSlot.subjectId,
-      orElse: () => subjects.first,
-    );
+    final nowWeekday = DateTime.now().weekday;
+    final todaySlots = slots.where((s) => s.dayOfWeek == nowWeekday).toList();
+    final TimetableSlotModel selectedSlot =
+        todaySlots.isNotEmpty ? todaySlots.first : slots.first;
+    final SubjectModel subject =
+        resolveSubjectById(subjects, selectedSlot.subjectId) ??
+            (subjects.isNotEmpty
+                ? subjects.first
+                : const SubjectModel(
+                    id: 'unknown',
+                    name: 'Class Lecture',
+                    code: 'LEC',
+                    professor: 'Instructor',
+                  ));
 
-    _openQuickOverrideDialog(context, selectedSlot, subject);
+    _openQuickOverrideDialog(
+      context,
+      selectedSlot,
+      subject,
+      selectableSlots: slots,
+      allSubjects: subjects,
+    );
   }
 
   void _openSecurityManagement(BuildContext context) {
@@ -4372,7 +4677,9 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
 
   void _openResetPinDialog(BuildContext context, UserModel user) {
     final pinCtrl = TextEditingController(text: '1234');
-    final rollNo = user.rollNo ?? '';
+    final identifier = user.rollNo?.trim().isNotEmpty == true
+        ? user.rollNo!.trim()
+        : (user.email.trim().isNotEmpty ? user.email.trim() : user.id);
 
     showDialog(
       context: context,
@@ -4390,7 +4697,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Resetting PIN for ${user.name} ($rollNo).',
+              'Resetting PIN for ${user.name} ($identifier).',
               style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
             ),
             const SizedBox(height: 12),
@@ -4417,13 +4724,13 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
               if (newPin.length < 4) return;
               final ok = await ref
                   .read(usersListProvider.notifier)
-                  .resetPin(rollNo, newPin);
+                  .resetPin(identifier, newPin);
               if (context.mounted) {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(ok
-                        ? 'PIN for $rollNo reset to $newPin!'
+                        ? 'PIN for ${user.name} reset to $newPin!'
                         : 'Failed to reset PIN.'),
                     backgroundColor: ok ? AppColors.success : AppColors.danger,
                   ),
@@ -4442,14 +4749,16 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
   }
 
   void _confirmDeleteUser(BuildContext context, UserModel user) {
-    final rollNo = user.rollNo ?? '';
+    final identifier = user.rollNo?.trim().isNotEmpty == true
+        ? user.rollNo!.trim()
+        : (user.email.trim().isNotEmpty ? user.email.trim() : user.id);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text('Delete ${user.name}?'),
         content: Text(
-          'Are you sure you want to delete user "$rollNo"? Their claimed student credentials, PIN, and account data will be permanently removed.',
+          'Are you sure you want to delete user "${user.name}" ($identifier)? Their account data will be permanently removed.',
         ),
         actions: [
           TextButton(
@@ -4460,13 +4769,13 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             onPressed: () async {
               final ok = await ref
                   .read(usersListProvider.notifier)
-                  .deleteUser(rollNo);
+                  .deleteUser(identifier);
               if (context.mounted) {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(ok
-                        ? 'User "$rollNo" deleted from registry.'
+                        ? 'User "${user.name}" deleted from registry.'
                         : 'Failed to delete user.'),
                     backgroundColor: ok ? AppColors.success : AppColors.danger,
                   ),
@@ -4603,6 +4912,43 @@ class _AdminSlotCard extends StatelessWidget {
                     color: AppColors.textSecondary,
                   ),
                 ),
+                if (slot.hasMeetingUrl) ...[
+                  const SizedBox(height: 6),
+                  InkWell(
+                    onTap: () => Formatters.launchMeetingUrl(
+                        context, slot.effectiveMeetingUrl),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: AppColors.primary.withValues(alpha: 0.25)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.video_call_rounded,
+                              size: 14, color: AppColors.primary),
+                          SizedBox(width: 4),
+                          Text(
+                            'Join Class Meeting',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          SizedBox(width: 4),
+                          Icon(Icons.open_in_new_rounded,
+                              size: 11, color: AppColors.primary),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -4929,6 +5275,46 @@ class _AdminOverrideCard extends StatelessWidget {
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
                 color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+          if (!isCancelled &&
+              (dailyOverride.hasMeetingUrl || (slot?.hasMeetingUrl ?? false))) ...[
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: () => Formatters.launchMeetingUrl(
+                context,
+                dailyOverride.effectiveMeetingUrl ?? slot?.effectiveMeetingUrl,
+              ),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.25)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.video_call_rounded,
+                        size: 15, color: AppColors.primary),
+                    SizedBox(width: 5),
+                    Text(
+                      'Join Class Meeting',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    SizedBox(width: 4),
+                    Icon(Icons.open_in_new_rounded,
+                        size: 12, color: AppColors.primary),
+                  ],
+                ),
               ),
             ),
           ],

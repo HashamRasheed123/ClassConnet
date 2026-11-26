@@ -29,34 +29,25 @@ Returns JSON containing metadata about the newest release.
   "download_url": "/api/v1/download/1"
 }
 ```
-
 ### Error Responses
 - **404 Not Found**: If the `package_name` is not registered on the server, or if no releases have been uploaded for it yet.
-
 ### Integration Logic
 1. Fetch the JSON from this endpoint.
 2. Compare the returned `version_code` (integer) against the app's currently running version code.
 3. If the server's `version_code` > local version code, prompt the user to update.
-
 ---
-
 ## 2. Download Release File
 Use this endpoint to download the actual `.apk` or `.exe` file for installation.
-
 **Endpoint:** `GET /download/{release_id}`
 *(Note: You do not need to construct this URL manually. Simply append the `download_url` value from the update-check response to your Base URL).*
-
 **Authentication:** None required
-
 ### Response (200 OK)
 Streams the binary file contents.
 Headers will correctly identify the file type:
 - `.apk`: `Content-Type: application/vnd.android.package-archive`
 - `.exe`: `Content-Type: application/x-msdownload`
-
 ### Error Responses
 - **404 Not Found**: If the requested release ID doesn't exist, or the physical file is missing from the server.
-
 ### Integration Logic
 1. Use a package like `dio` to download the file from this URL.
 2. Save it to a temporary directory on the device (e.g., using `path_provider`).

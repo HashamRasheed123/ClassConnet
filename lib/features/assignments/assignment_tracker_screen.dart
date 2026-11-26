@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../core/services/offline_document_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/uuid_util.dart';
 import '../../models/models.dart';
 import '../../providers/class_providers.dart';
+import '../assignment_scanner/assignment_scanner_screen.dart';
 
 class AssignmentTrackerScreen extends ConsumerStatefulWidget {
   const AssignmentTrackerScreen({super.key});
@@ -31,13 +33,17 @@ class _AssignmentTrackerScreenState
 
     // Filter assignments
     final filtered = assignments.where((a) {
-      if (_selectedSubjectId != null && a.subjectId != _selectedSubjectId) {
+      if (_selectedSubjectId != null &&
+          a.subjectId != _selectedSubjectId &&
+          UuidUtil.fromString(a.subjectId) !=
+              UuidUtil.fromString(_selectedSubjectId!)) {
         return false;
       }
       final isDone = completedIds.contains(a.id);
       if (_selectedFilter == 'pending' && isDone) return false;
       if (_selectedFilter == 'completed' && !isDone) return false;
-      if (_selectedFilter == 'urgent' && !(a.isDueTomorrow || a.isDueToday)) {
+      if (_selectedFilter == 'urgent' &&
+          !(a.isOverdue || a.isDueTomorrow || a.isDueToday)) {
         return false;
       }
       return true;
@@ -280,10 +286,11 @@ class _AssignmentTrackerScreenState
                       itemCount: filtered.length,
                       itemBuilder: (ctx, index) {
                         final a = filtered[index];
-                        final sub = subjectMap[a.subjectId];
+                        final sub = resolveSubjectById(subjects, a.subjectId) ??
+                            subjectMap[a.subjectId];
                         final isDone = completedIds.contains(a.id);
                         return _buildAssignmentCard(
-                            context, a, sub, isDone, user.isAdmin);
+                            context, a, sub, isDone, user.isAdmin, subjects);
                       },
                     ),
             ),
@@ -326,6 +333,7 @@ class _AssignmentTrackerScreenState
     SubjectModel? sub,
     bool isDone,
     bool isAdmin,
+    List<SubjectModel> subjects,
   ) {
     Color statusColor = AppColors.primary;
     String statusLabel = a.formattedDeadline;
@@ -483,54 +491,139 @@ class _AssignmentTrackerScreenState
               ],
             ),
 
-            // Bottom action row: Link attachment & Admin Delete
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            // Bottom action row: Scan PDF, Link attachment & Admin Edit/Delete
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.spaceBetween,
               children: [
-                if (a.driveUrl != null && a.driveUrl!.isNotEmpty)
-                  InkWell(
-                    onTap: () async {
-                      final uri = Uri.parse(a.driveUrl!);
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri,
-                            mode: LaunchMode.externalApplication);
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.attachment_rounded,
-                              size: 14, color: AppColors.primary),
-                          SizedBox(width: 4),
-                          Text(
-                            'Open Document / Link',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primary,
-                            ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InkWell(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AssignmentScannerScreen(
+                            initialAssignment: a,
                           ),
-                        ],
+                        ),
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySoft,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.document_scanner_rounded,
+                                size: 14, color: AppColors.primary),
+                            SizedBox(width: 5),
+                            Text(
+                              'Scan & Make PDF',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  )
-                else
-                  const SizedBox.shrink(),
+                    if (a.driveUrl != null && a.driveUrl!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Builder(
+                        builder: (context) {
+                          final cached = OfflineDocumentService.instance
+                              .peekCachedEntry(a.driveUrl!);
+                          final isCached = cached != null;
+                          return InkWell(
+                            onTap: () async {
+                              await OfflineDocumentService.instance
+                                  .openOrDownloadDocument(
+                                context,
+                                url: a.driveUrl!,
+                                title: a.title,
+                                onCacheUpdated: () {
+                                  if (mounted) setState(() {});
+                                },
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: isCached
+                                    ? const Color(0xFFECFDF5)
+                                    : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(8),
+                                border: isCached
+                                    ? Border.all(color: const Color(0xFFA7F3D0))
+                                    : null,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    isCached
+                                        ? Icons.offline_pin_rounded
+                                        : Icons.download_for_offline_outlined,
+                                    size: 14,
+                                    color: isCached
+                                        ? const Color(0xFF059669)
+                                        : AppColors.primary,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    isCached
+                                        ? 'Offline Ready'
+                                        : 'Save / View File',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: isCached
+                                          ? const Color(0xFF065F46)
+                                          : AppColors.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ],
+                ),
                 if (isAdmin)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded,
-                        size: 18, color: AppColors.danger),
-                    tooltip: 'Delete Assignment',
-                    onPressed: () => _confirmDeleteAssignment(context, a),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined,
+                            size: 18, color: AppColors.primary),
+                        tooltip: 'Edit Assignment',
+                        onPressed: () => _showCreateAssignmentDialog(
+                          context,
+                          subjects,
+                          existingAssignment: a,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded,
+                            size: 18, color: AppColors.danger),
+                        tooltip: 'Delete Assignment',
+                        onPressed: () => _confirmDeleteAssignment(context, a),
+                      ),
+                    ],
                   ),
               ],
             ),
@@ -555,9 +648,26 @@ class _AssignmentTrackerScreenState
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () async {
               Navigator.pop(ctx);
-              await ref
+              final error = await ref
                   .read(assignmentsProvider.notifier)
                   .deleteAssignment(a.id);
+              if (context.mounted) {
+                if (error == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Assignment deleted successfully.'),
+                      backgroundColor: AppColors.textPrimary,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Deleted locally (Cloud: $error)'),
+                      backgroundColor: AppColors.warning,
+                    ),
+                  );
+                }
+              }
             },
             child: const Text('Delete'),
           ),
@@ -567,13 +677,31 @@ class _AssignmentTrackerScreenState
   }
 
   void _showCreateAssignmentDialog(
-      BuildContext context, List<SubjectModel> subjects) {
-    final titleCtrl = TextEditingController();
-    final descCtrl = TextEditingController();
-    final urlCtrl = TextEditingController();
-    String? subjectId = subjects.isNotEmpty ? subjects.first.id : null;
-    DateTime deadline = DateTime.now().add(const Duration(days: 1));
-    TimeOfDay deadlineTime = const TimeOfDay(hour: 23, minute: 59);
+    BuildContext context,
+    List<SubjectModel> subjects, {
+    AssignmentModel? existingAssignment,
+  }) {
+    final isEditing = existingAssignment != null;
+    final titleCtrl =
+        TextEditingController(text: existingAssignment?.title ?? '');
+    final descCtrl =
+        TextEditingController(text: existingAssignment?.description ?? '');
+    final urlCtrl =
+        TextEditingController(text: existingAssignment?.driveUrl ?? '');
+
+    final matchedSubject = existingAssignment != null
+        ? resolveSubjectById(subjects, existingAssignment.subjectId)
+        : null;
+    String? subjectId = matchedSubject?.id ??
+        (subjects.isNotEmpty ? subjects.first.id : existingAssignment?.subjectId);
+    DateTime deadline = existingAssignment?.deadline ??
+        DateTime.now().add(const Duration(days: 1));
+    TimeOfDay deadlineTime = existingAssignment != null
+        ? TimeOfDay(
+            hour: existingAssignment.deadline.hour,
+            minute: existingAssignment.deadline.minute,
+          )
+        : const TimeOfDay(hour: 23, minute: 59);
 
     showModalBottomSheet(
       context: context,
@@ -607,9 +735,11 @@ class _AssignmentTrackerScreenState
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
-                      'Post New Class Assignment',
-                      style: TextStyle(
+                    Text(
+                      isEditing
+                          ? 'Edit Class Assignment'
+                          : 'Post New Class Assignment',
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
@@ -617,7 +747,7 @@ class _AssignmentTrackerScreenState
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'This assignment will sync to all students and alert them if due tomorrow.',
+                      'This assignment will sync to all students and schedule deadline reminders.',
                       style: TextStyle(
                           fontSize: 12, color: AppColors.textSecondary),
                     ),
@@ -637,7 +767,9 @@ class _AssignmentTrackerScreenState
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
-                          value: subjectId,
+                          value: subjects.any((s) => s.id == subjectId)
+                              ? subjectId
+                              : (subjects.isNotEmpty ? subjects.first.id : null),
                           isExpanded: true,
                           items: subjects
                               .map((s) => DropdownMenuItem(
@@ -707,7 +839,7 @@ class _AssignmentTrackerScreenState
                                 context: ctx,
                                 initialDate: deadline,
                                 firstDate: DateTime.now()
-                                    .subtract(const Duration(days: 7)),
+                                    .subtract(const Duration(days: 30)),
                                 lastDate: DateTime.now()
                                     .add(const Duration(days: 365)),
                               );
@@ -772,7 +904,8 @@ class _AssignmentTrackerScreenState
                         if (title.isEmpty || subjectId == null) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                                content: Text('Please enter an assignment title.')),
+                                content:
+                                    Text('Please enter an assignment title.')),
                           );
                           return;
                         }
@@ -785,28 +918,62 @@ class _AssignmentTrackerScreenState
                           deadlineTime.minute,
                         );
 
-                        await ref
-                            .read(assignmentsProvider.notifier)
-                            .createAssignment(
-                              subjectId: subjectId!,
-                              title: title,
-                              description: descCtrl.text.trim(),
-                              deadline: combinedDeadline,
-                              driveUrl: urlCtrl.text.trim(),
-                            );
+                        final String? error;
+                        if (isEditing) {
+                          error = await ref
+                              .read(assignmentsProvider.notifier)
+                              .updateAssignment(
+                                existingAssignment.copyWith(
+                                  subjectId: subjectId!,
+                                  title: title,
+                                  description: descCtrl.text.trim(),
+                                  deadline: combinedDeadline,
+                                  driveUrl: urlCtrl.text.trim().isNotEmpty
+                                      ? urlCtrl.text.trim()
+                                      : null,
+                                ),
+                              );
+                        } else {
+                          error = await ref
+                              .read(assignmentsProvider.notifier)
+                              .createAssignment(
+                                subjectId: subjectId!,
+                                title: title,
+                                description: descCtrl.text.trim(),
+                                deadline: combinedDeadline,
+                                driveUrl: urlCtrl.text.trim(),
+                              );
+                        }
 
                         if (ctx.mounted) Navigator.pop(ctx);
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Assignment posted successfully!'),
-                              backgroundColor: AppColors.success,
-                            ),
-                          );
+                          if (error == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(isEditing
+                                    ? 'Assignment updated and synced with class!'
+                                    : 'Assignment posted and synced with class!'),
+                                backgroundColor: AppColors.success,
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                    'Saved locally (Cloud: $error)'),
+                                backgroundColor: AppColors.warning,
+                                duration: const Duration(seconds: 4),
+                              ),
+                            );
+                          }
                         }
                       },
-                      child: const Text('Publish Assignment to Class',
-                          style: TextStyle(fontWeight: FontWeight.w800)),
+                      child: Text(
+                        isEditing
+                            ? 'Update Assignment & Sync'
+                            : 'Publish Assignment to Class',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                     ),
                   ],
                 ),

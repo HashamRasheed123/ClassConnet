@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,10 +8,25 @@ import '../core/config/app_config.dart';
 import '../core/services/alert_scheduler.dart';
 import '../core/services/auth_service.dart';
 import '../core/services/sync_service.dart';
+import '../core/utils/formatters.dart';
 import '../core/utils/google_drive_util.dart';
 import '../core/utils/uuid_util.dart';
 import '../models/models.dart';
 import '../repositories/class_repository.dart';
+
+/// Resolves a [SubjectModel] by id using both exact and UUID-normalized matching.
+SubjectModel? resolveSubjectById(
+    Iterable<SubjectModel> subjects, String? subjectId) {
+  if (subjectId == null || subjectId.trim().isEmpty) return null;
+  for (final s in subjects) {
+    if (s.id == subjectId) return s;
+  }
+  final normTarget = UuidUtil.fromString(subjectId);
+  for (final s in subjects) {
+    if (UuidUtil.fromString(s.id) == normTarget) return s;
+  }
+  return null;
+}
 
 // ===================================================================
 // REPOSITORY & SYNC PROVIDERS
@@ -65,6 +81,10 @@ class SyncNotifier extends Notifier<SyncState> {
     await ref.read(timetableSlotsProvider.notifier).reloadFromLocal();
     await ref.read(dailyOverridesProvider.notifier).reloadFromLocal();
     await ref.read(resourcesProvider.notifier).reloadFromLocal();
+    await ref.read(assignmentsProvider.notifier).reloadFromLocal();
+    await ref.read(quizzesProvider.notifier).reloadFromLocal();
+
+    _resyncAlertsFromRef(ref);
 
     state = state.copyWith(
       isSyncing: false,
@@ -221,22 +241,41 @@ class UserNotifier extends Notifier<UserModel> {
     String? rollNo,
     String? avatarUrl,
   }) {
-    state = state.copyWith(
+    final updated = state.copyWith(
       name: name ?? state.name,
       email: email ?? state.email,
       rollNo: rollNo ?? state.rollNo,
       avatarUrl: avatarUrl ?? state.avatarUrl,
     );
+    state = updated;
+    if (updated.isLoggedIn) {
+      AuthService.instance.saveSession(updated);
+      if (updated.rollNo != null && updated.rollNo!.isNotEmpty) {
+        AuthService.instance.adminUpdateUser(updated);
+      }
+    }
     HapticFeedback.lightImpact();
   }
 
   void addCredits(int amount) {
-    state = state.copyWith(credits: state.credits + amount);
+    if (amount <= 0) return;
+    final updated = state.copyWith(credits: state.credits + amount);
+    state = updated;
+    if (updated.isLoggedIn) {
+      AuthService.instance.saveSession(updated);
+      if (updated.rollNo != null && updated.rollNo!.isNotEmpty) {
+        AuthService.instance.adminUpdateUser(updated);
+      }
+    }
   }
 
   bool deductCredits(int amount) {
     if (state.credits < amount) return false;
-    state = state.copyWith(credits: state.credits - amount);
+    final updated = state.copyWith(credits: state.credits - amount);
+    state = updated;
+    if (updated.isLoggedIn) {
+      AuthService.instance.saveSession(updated);
+    }
     return true;
   }
 }
@@ -275,12 +314,13 @@ class UsersListNotifier extends Notifier<List<UserModel>> {
     if (ok) {
       await refresh();
       final current = ref.read(currentUserProvider);
-      if (current.rollNo == user.rollNo) {
-        ref.read(currentUserProvider.notifier).updateProfile(
-              name: user.name,
-              email: user.email,
-              rollNo: user.rollNo,
-            );
+      final sameRoll = current.rollNo != null &&
+          current.rollNo!.isNotEmpty &&
+          current.rollNo == user.rollNo;
+      final sameEmail = current.email.isNotEmpty &&
+          current.email.toLowerCase() == user.email.toLowerCase();
+      if (current.id == user.id || sameRoll || sameEmail) {
+        await ref.read(currentUserProvider.notifier).reloadSession();
       }
     }
     return ok;
@@ -446,36 +486,81 @@ class TimetableSlotsNotifier extends Notifier<List<TimetableSlotModel>> {
     }
   }
 
-  void addSlot(TimetableSlotModel slot) {
-    state = [...state, slot];
-    ref.read(classRepositoryProvider).cacheSlots(state);
+  Future<String?> addSlot(TimetableSlotModel slot) async {
+    final normalizedSlot = slot.copyWith(
+      startTime: Formatters.normalizeTime(slot.startTime),
+      endTime: Formatters.normalizeTime(slot.endTime),
+    );
+    state = [...state, normalizedSlot];
+    await ref.read(classRepositoryProvider).cacheSlots(state);
     ref.read(syncServiceProvider).enqueueMutation(
           entity: 'slot',
-          entityId: slot.id,
+          entityId: normalizedSlot.id,
           action: 'upsert',
-          payload: slot.toMap(),
+          payload: normalizedSlot.toMap(),
         );
     ref.read(syncStateProvider.notifier).refreshPendingCount();
-    ref.read(classRepositoryProvider).createSlot(slot);
+    final subject =
+        resolveSubjectById(ref.read(subjectsProvider), normalizedSlot.subjectId);
+    final error = await ref
+        .read(classRepositoryProvider)
+        .createSlot(normalizedSlot, subject: subject);
+    _resyncAlertsFromRef(ref);
     HapticFeedback.lightImpact();
+    return error;
   }
 
-  void updateSlot(TimetableSlotModel updated) {
-    state = state.map((s) => s.id == updated.id ? updated : s).toList();
-    ref.read(classRepositoryProvider).cacheSlots(state);
+  Future<String?> updateSlot(TimetableSlotModel updated) async {
+    final normalizedSlot = updated.copyWith(
+      startTime: Formatters.normalizeTime(updated.startTime),
+      endTime: Formatters.normalizeTime(updated.endTime),
+    );
+    final targetId = UuidUtil.fromString(normalizedSlot.id);
+    state = state
+        .map((s) => (s.id == normalizedSlot.id ||
+                UuidUtil.fromString(s.id) == targetId)
+            ? normalizedSlot
+            : s)
+        .toList();
+    await ref.read(classRepositoryProvider).cacheSlots(state);
     ref.read(syncServiceProvider).enqueueMutation(
           entity: 'slot',
-          entityId: updated.id,
+          entityId: normalizedSlot.id,
           action: 'upsert',
-          payload: updated.toMap(),
+          payload: normalizedSlot.toMap(),
         );
     ref.read(syncStateProvider.notifier).refreshPendingCount();
-    ref.read(classRepositoryProvider).updateSlot(updated);
+    final subject =
+        resolveSubjectById(ref.read(subjectsProvider), normalizedSlot.subjectId);
+    final error = await ref
+        .read(classRepositoryProvider)
+        .updateSlot(normalizedSlot, subject: subject);
+
+    // Clear any stale non-cancelled overrides on this slot so the newly edited
+    // slot time/room takes effect immediately without being shadowed.
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final staleOverrides = ref.read(dailyOverridesProvider).where((o) {
+      final sameSlot = o.slotId == normalizedSlot.id ||
+          UuidUtil.fromString(o.slotId) == targetId;
+      if (!sameSlot) return false;
+      final oDay = DateTime(o.date.year, o.date.month, o.date.day);
+      return !oDay.isBefore(today) && o.status == OverrideStatus.rescheduled;
+    }).toList();
+    for (final stale in staleOverrides) {
+      ref.read(dailyOverridesProvider.notifier).deleteOverride(stale.id);
+    }
+
+    _resyncAlertsFromRef(ref);
     HapticFeedback.lightImpact();
+    return error;
   }
 
   void deleteSlot(String slotId) {
-    state = state.where((s) => s.id != slotId).toList();
+    final targetId = UuidUtil.fromString(slotId);
+    state = state
+        .where((s) => s.id != slotId && UuidUtil.fromString(s.id) != targetId)
+        .toList();
     ref.read(classRepositoryProvider).cacheSlots(state);
     ref.read(syncServiceProvider).enqueueMutation(
           entity: 'slot',
@@ -484,6 +569,7 @@ class TimetableSlotsNotifier extends Notifier<List<TimetableSlotModel>> {
         );
     ref.read(syncStateProvider.notifier).refreshPendingCount();
     ref.read(classRepositoryProvider).deleteSlot(slotId);
+    _resyncAlertsFromRef(ref);
     HapticFeedback.mediumImpact();
   }
 
@@ -505,6 +591,30 @@ class TimetableSlotsNotifier extends Notifier<List<TimetableSlotModel>> {
 final timetableSlotsProvider =
     NotifierProvider<TimetableSlotsNotifier, List<TimetableSlotModel>>(
         TimetableSlotsNotifier.new);
+
+void _resyncAlertsFromRef(Ref ref) {
+  try {
+    final slots = ref.read(timetableSlotsProvider);
+    final subjects = ref.read(subjectsProvider);
+    final mode = ref.read(alertModeProvider);
+    final leadTime = ref.read(alertLeadTimeProvider);
+    final overrides = ref.read(dailyOverridesProvider);
+    final assignments = ref.read(assignmentsProvider);
+    final completed = ref.read(assignmentCompletionProvider);
+    final subjectMap = {for (final s in subjects) s.id: s};
+    AlertScheduler.instance.syncAllTimetableAlerts(
+      slots: slots,
+      subjectMap: subjectMap,
+      mode: mode,
+      leadTimeMinutes: leadTime,
+      overrides: overrides,
+      assignments: assignments,
+      completedAssignmentIds: completed,
+    );
+  } catch (e) {
+    debugPrint('Error resyncing alerts: $e');
+  }
+}
 
 // ===================================================================
 // DAILY OVERRIDES PROVIDER
@@ -544,6 +654,7 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
     String? actualStartTime,
     String? actualEndTime,
     DateTime? rescheduledDate,
+    String? meetingUrl,
     String? topicCovered,
     required String reportedBy,
   }) {
@@ -553,9 +664,11 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
       date: DateTime.now(),
       status: status,
       actualRoom: actualRoom,
-      actualStartTime: actualStartTime,
-      actualEndTime: actualEndTime,
+      actualStartTime: Formatters.normalizeOptionalTime(actualStartTime),
+      actualEndTime: Formatters.normalizeOptionalTime(actualEndTime),
       rescheduledDate: rescheduledDate,
+      meetingUrl:
+          meetingUrl?.trim().isNotEmpty == true ? meetingUrl!.trim() : null,
       topicCovered: topicCovered,
       reportedBy: reportedBy,
       isApproved: false, // Sent to Admin Mod Queue
@@ -572,8 +685,9 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
     ref.read(classRepositoryProvider).saveOverride(newOverride);
   }
 
-  /// Direct admin override with instant approval and optional Supabase sync
-  void setDirectOverride({
+  /// Direct admin override with instant approval and cloud Supabase sync.
+  /// Returns null on success, or a human-friendly error if the push fails.
+  Future<String?> setDirectOverride({
     required String slotId,
     required OverrideStatus status,
     DateTime? date,
@@ -581,15 +695,26 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
     String? actualStartTime,
     String? actualEndTime,
     DateTime? rescheduledDate,
+    String? meetingUrl,
     String? topicCovered,
-  }) {
+  }) async {
     final targetDate = date ?? DateTime.now();
     final targetDayStr = targetDate.toIso8601String().substring(0, 10);
+    final normSlotId = UuidUtil.fromString(slotId);
 
-    // Filter out previous override for same slot on same date
+    // Filter out previous override for same slot on same date (or same rescheduled target date)
     final remaining = state.where((o) {
+      final sameSlot =
+          o.slotId == slotId || UuidUtil.fromString(o.slotId) == normSlotId;
+      if (!sameSlot) return true;
       final oDayStr = o.date.toIso8601String().substring(0, 10);
-      return !(o.slotId == slotId && oDayStr == targetDayStr);
+      if (oDayStr == targetDayStr) return false;
+      if (rescheduledDate != null && o.rescheduledDate != null) {
+        final rDayStr = rescheduledDate.toIso8601String().substring(0, 10);
+        final oRDayStr = o.rescheduledDate!.toIso8601String().substring(0, 10);
+        if (rDayStr == oRDayStr) return false;
+      }
+      return true;
     }).toList();
 
     final newOverride = DailyOverrideModel(
@@ -597,17 +722,20 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
       slotId: slotId,
       date: targetDate,
       status: status,
-      actualRoom: actualRoom,
-      actualStartTime: actualStartTime,
-      actualEndTime: actualEndTime,
+      actualRoom: actualRoom?.trim().isNotEmpty == true ? actualRoom!.trim() : null,
+      actualStartTime: Formatters.normalizeOptionalTime(actualStartTime),
+      actualEndTime: Formatters.normalizeOptionalTime(actualEndTime),
       rescheduledDate: rescheduledDate,
-      topicCovered: topicCovered,
+      meetingUrl:
+          meetingUrl?.trim().isNotEmpty == true ? meetingUrl!.trim() : null,
+      topicCovered:
+          topicCovered?.trim().isNotEmpty == true ? topicCovered!.trim() : null,
       reportedBy: ref.read(currentUserProvider).id,
       isApproved: true, // Immediate admin broadcast
     );
 
     state = [newOverride, ...remaining];
-    ref.read(classRepositoryProvider).cacheOverrides(state);
+    await ref.read(classRepositoryProvider).cacheOverrides(state);
     ref.read(syncServiceProvider).enqueueMutation(
           entity: 'override',
           entityId: newOverride.id,
@@ -615,8 +743,26 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
           payload: newOverride.toMap(),
         );
     ref.read(syncStateProvider.notifier).refreshPendingCount();
-    ref.read(classRepositoryProvider).saveOverride(newOverride);
+
+    final slots = ref.read(timetableSlotsProvider);
+    final slot = slots.cast<TimetableSlotModel?>().firstWhere(
+          (s) =>
+              s != null &&
+              (s.id == slotId || UuidUtil.fromString(s.id) == normSlotId),
+          orElse: () => null,
+        );
+    final subject = slot != null
+        ? resolveSubjectById(ref.read(subjectsProvider), slot.subjectId)
+        : null;
+
+    final error = await ref.read(classRepositoryProvider).saveOverride(
+          newOverride,
+          slot: slot,
+          subject: subject,
+        );
+    _resyncAlertsFromRef(ref);
     HapticFeedback.mediumImpact();
+    return error;
   }
 
   void deleteOverride(String overrideId) {
@@ -629,6 +775,7 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
         );
     ref.read(syncStateProvider.notifier).refreshPendingCount();
     ref.read(classRepositoryProvider).deleteOverride(overrideId);
+    _resyncAlertsFromRef(ref);
     HapticFeedback.selectionClick();
   }
 
@@ -649,6 +796,7 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
     }).toList();
     ref.read(syncStateProvider.notifier).refreshPendingCount();
     ref.read(classRepositoryProvider).cacheOverrides(state);
+    _resyncAlertsFromRef(ref);
   }
 
   void rejectOverride(String overrideId) {
@@ -661,6 +809,7 @@ class OverridesNotifier extends Notifier<List<DailyOverrideModel>> {
         );
     ref.read(syncStateProvider.notifier).refreshPendingCount();
     ref.read(classRepositoryProvider).deleteOverride(overrideId);
+    _resyncAlertsFromRef(ref);
   }
 }
 
@@ -669,12 +818,14 @@ final dailyOverridesProvider =
         OverridesNotifier.new);
 
 // ===================================================================
-// TODAY LECTURES COMPUTED PROVIDER
+// TODAY & NEXT LECTURES COMPUTED PROVIDERS
 // ===================================================================
 
-DateTime _parseLectureTime(DateTime date, String timeStr, int fallbackH, int fallbackM) {
+DateTime _parseLectureTime(
+    DateTime date, String timeStr, int fallbackH, int fallbackM) {
   try {
-    final parts = timeStr.trim().split(':');
+    final norm = Formatters.normalizeTime(timeStr);
+    final parts = (norm.isNotEmpty ? norm : timeStr).trim().split(':');
     final h = int.parse(parts[0]);
     final m = parts.length > 1 ? int.parse(parts[1]) : 0;
     return DateTime(date.year, date.month, date.day, h, m);
@@ -683,56 +834,65 @@ DateTime _parseLectureTime(DateTime date, String timeStr, int fallbackH, int fal
   }
 }
 
-final todayLecturesProvider = Provider<List<LectureItem>>((ref) {
-  final slots = ref.watch(timetableSlotsProvider);
-  final subjects = ref.watch(subjectsProvider);
-  final overrides = ref.watch(dailyOverridesProvider);
-
-  final now = DateTime.now();
-  final dayOfWeek = now.weekday; // 1 = Mon ... 7 = Sun (accurate real-world day)
+/// Computes all concrete lectures for [targetDate] applying overrides
+/// (time changes, room changes, cancellations, and cross-day reschedules).
+List<LectureItem> computeLecturesForDate({
+  required DateTime targetDate,
+  required List<TimetableSlotModel> slots,
+  required List<SubjectModel> subjects,
+  required List<DailyOverrideModel> overrides,
+}) {
+  final dayOfWeek = targetDate.weekday;
 
   bool isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  final todaySlots = slots.where((s) => s.dayOfWeek == dayOfWeek).toList();
-  final items = <LectureItem>[];
+  bool idsMatch(String a, String b) =>
+      a == b || UuidUtil.fromString(a) == UuidUtil.fromString(b);
 
   SubjectModel getSubjectForSlot(TimetableSlotModel slot) {
-    final targetUuid = UuidUtil.fromString(slot.subjectId);
-    return subjects.firstWhere(
-      (s) => s.id == slot.subjectId || UuidUtil.fromString(s.id) == targetUuid,
-      orElse: () => subjects.isNotEmpty
-          ? subjects.first
-          : const SubjectModel(
-              id: 'unknown',
-              name: 'Class Lecture',
-              code: 'LEC',
-              professor: 'Instructor',
-            ),
-    );
+    return resolveSubjectById(subjects, slot.subjectId) ??
+        (subjects.isNotEmpty
+            ? subjects.first
+            : const SubjectModel(
+                id: 'unknown',
+                name: 'Class Lecture',
+                code: 'LEC',
+                professor: 'Instructor',
+              ));
   }
 
-  for (final slot in todaySlots) {
+  final daySlots = slots.where((s) => s.dayOfWeek == dayOfWeek).toList();
+  final items = <LectureItem>[];
+
+  for (final slot in daySlots) {
     final subject = getSubjectForSlot(slot);
 
     final override = overrides.cast<DailyOverrideModel?>().firstWhere(
       (o) =>
           o != null &&
-          o.slotId == slot.id &&
-          isSameDay(o.date, now) &&
-          o.isApproved,
+          o.isApproved &&
+          idsMatch(o.slotId, slot.id) &&
+          (isSameDay(o.date, targetDate) ||
+              (o.status == OverrideStatus.rescheduled &&
+                  o.rescheduledDate != null &&
+                  isSameDay(o.rescheduledDate!, targetDate))),
       orElse: () => null,
     );
 
-    final effectiveStart = (override?.actualStartTime != null && override!.actualStartTime!.isNotEmpty)
-        ? override.actualStartTime!
-        : slot.startTime;
-    final effectiveEnd = (override?.actualEndTime != null && override!.actualEndTime!.isNotEmpty)
-        ? override.actualEndTime!
-        : slot.endTime;
+    final effectiveStart = (override?.status == OverrideStatus.rescheduled &&
+            override?.actualStartTime != null &&
+            override!.actualStartTime!.isNotEmpty)
+        ? Formatters.normalizeTime(override.actualStartTime)
+        : Formatters.normalizeTime(slot.startTime);
+    final effectiveEnd = (override?.status == OverrideStatus.rescheduled &&
+            override?.actualEndTime != null &&
+            override!.actualEndTime!.isNotEmpty)
+        ? Formatters.normalizeTime(override.actualEndTime)
+        : Formatters.normalizeTime(slot.endTime);
 
-    final startsAt = _parseLectureTime(now, effectiveStart, 9, 0);
-    final endsAt = _parseLectureTime(now, effectiveEnd, 10, 0);
+    final startsAt = _parseLectureTime(targetDate, effectiveStart, 9, 0);
+    final endsAt = _parseLectureTime(targetDate, effectiveEnd, 10, 0);
 
     items.add(LectureItem(
       slot: slot,
@@ -743,45 +903,55 @@ final todayLecturesProvider = Provider<List<LectureItem>>((ref) {
     ));
   }
 
-  // Also include classes from other days that were rescheduled to today
+  // Also include classes from other days that were rescheduled onto targetDate
   for (final ov in overrides) {
-    if (ov.isApproved &&
-        ov.status == OverrideStatus.rescheduled &&
-        ov.rescheduledDate != null &&
-        isSameDay(ov.rescheduledDate!, now)) {
-      final targetSlotUuid = UuidUtil.fromString(ov.slotId);
-      final originSlot = slots.cast<TimetableSlotModel?>().firstWhere(
-        (s) => s != null && (s.id == ov.slotId || UuidUtil.fromString(s.id) == targetSlotUuid),
-        orElse: () => null,
-      );
+    if (!ov.isApproved || ov.status != OverrideStatus.rescheduled) continue;
+    final movedTarget = ov.rescheduledDate ?? ov.date;
+    if (!isSameDay(movedTarget, targetDate)) continue;
 
-      if (originSlot != null && originSlot.dayOfWeek != dayOfWeek) {
-        if (!items.any((it) => it.slot.id == originSlot.id)) {
-          final subject = getSubjectForSlot(originSlot);
-          final effectiveStart = (ov.actualStartTime != null && ov.actualStartTime!.isNotEmpty)
-              ? ov.actualStartTime!
-              : originSlot.startTime;
-          final effectiveEnd = (ov.actualEndTime != null && ov.actualEndTime!.isNotEmpty)
-              ? ov.actualEndTime!
-              : originSlot.endTime;
+    final originSlot = slots.cast<TimetableSlotModel?>().firstWhere(
+          (s) => s != null && idsMatch(s.id, ov.slotId),
+          orElse: () => null,
+        );
+    if (originSlot == null) continue;
+    if (items.any((it) => idsMatch(it.slot.id, originSlot.id))) continue;
 
-          final startsAt = _parseLectureTime(now, effectiveStart, 9, 0);
-          final endsAt = _parseLectureTime(now, effectiveEnd, 10, 0);
+    final subject = getSubjectForSlot(originSlot);
+    final effectiveStart =
+        (ov.actualStartTime != null && ov.actualStartTime!.isNotEmpty)
+            ? Formatters.normalizeTime(ov.actualStartTime)
+            : Formatters.normalizeTime(originSlot.startTime);
+    final effectiveEnd =
+        (ov.actualEndTime != null && ov.actualEndTime!.isNotEmpty)
+            ? Formatters.normalizeTime(ov.actualEndTime)
+            : Formatters.normalizeTime(originSlot.endTime);
 
-          items.add(LectureItem(
-            slot: originSlot,
-            subject: subject,
-            override: ov,
-            startsAt: startsAt,
-            endsAt: endsAt,
-          ));
-        }
-      }
-    }
+    final startsAt = _parseLectureTime(targetDate, effectiveStart, 9, 0);
+    final endsAt = _parseLectureTime(targetDate, effectiveEnd, 10, 0);
+
+    items.add(LectureItem(
+      slot: originSlot,
+      subject: subject,
+      override: ov,
+      startsAt: startsAt,
+      endsAt: endsAt,
+    ));
   }
 
   items.sort((a, b) => a.startsAt.compareTo(b.startsAt));
   return items;
+}
+
+final todayLecturesProvider = Provider<List<LectureItem>>((ref) {
+  final slots = ref.watch(timetableSlotsProvider);
+  final subjects = ref.watch(subjectsProvider);
+  final overrides = ref.watch(dailyOverridesProvider);
+  return computeLecturesForDate(
+    targetDate: DateTime.now(),
+    slots: slots,
+    subjects: subjects,
+    overrides: overrides,
+  );
 });
 
 final nextLectureProvider = Provider<LectureItem?>((ref) {
@@ -802,61 +972,20 @@ final nextLectureProvider = Provider<LectureItem?>((ref) {
     if (l.isUpcoming) return l;
   }
 
-  // 3. If no classes today (e.g. Sunday/weekend), search ahead across the coming days
+  // 3. Search ahead across the coming 7 days with full override awareness
   final now = DateTime.now();
   for (int offset = 1; offset <= 7; offset++) {
     final futureDate = now.add(Duration(days: offset));
-    final targetDayOfWeek = futureDate.weekday; // 1 = Mon ... 7 = Sun
+    final futureLectures = computeLecturesForDate(
+      targetDate: futureDate,
+      slots: slots,
+      subjects: subjects,
+      overrides: overrides,
+    ).where((l) => !l.isCancelled && !l.isDayMovedAway).toList();
 
-    final futureSlots =
-        slots.where((s) => s.dayOfWeek == targetDayOfWeek).toList();
-    if (futureSlots.isEmpty) continue;
-
-    // Earliest class on that upcoming day
-    futureSlots.sort((a, b) => a.startTime.compareTo(b.startTime));
-    final nextSlot = futureSlots.first;
-
-    final targetUuid = UuidUtil.fromString(nextSlot.subjectId);
-    final subject = subjects.firstWhere(
-      (s) => s.id == nextSlot.subjectId || UuidUtil.fromString(s.id) == targetUuid,
-      orElse: () => subjects.isNotEmpty
-          ? subjects.first
-          : const SubjectModel(
-              id: 'unknown',
-              name: 'Class Lecture',
-              code: 'LEC',
-              professor: 'Instructor',
-            ),
-    );
-
-    final override = overrides.cast<DailyOverrideModel?>().firstWhere(
-      (o) =>
-          o != null &&
-          o.slotId == nextSlot.id &&
-          o.date.year == futureDate.year &&
-          o.date.month == futureDate.month &&
-          o.date.day == futureDate.day &&
-          o.isApproved,
-      orElse: () => null,
-    );
-
-    final effectiveStart = (override?.actualStartTime != null && override!.actualStartTime!.isNotEmpty)
-        ? override.actualStartTime!
-        : nextSlot.startTime;
-    final effectiveEnd = (override?.actualEndTime != null && override!.actualEndTime!.isNotEmpty)
-        ? override.actualEndTime!
-        : nextSlot.endTime;
-
-    final startsAt = _parseLectureTime(futureDate, effectiveStart, 9, 0);
-    final endsAt = _parseLectureTime(futureDate, effectiveEnd, 10, 0);
-
-    return LectureItem(
-      slot: nextSlot,
-      subject: subject,
-      override: override,
-      startsAt: startsAt,
-      endsAt: endsAt,
-    );
+    if (futureLectures.isNotEmpty) {
+      return futureLectures.first;
+    }
   }
 
   return null;
@@ -896,14 +1025,16 @@ class ResourcesNotifier extends Notifier<List<ResourceModel>> {
 
   bool unlockResource(String resourceId) {
     final user = ref.read(currentUserProvider);
-    final resource = state.firstWhere((r) => r.id == resourceId);
+    final resource = state.where((r) => r.id == resourceId).firstOrNull;
+    if (resource == null) return false;
 
     if (resource.isUnlocked) return true;
 
-    if (user.credits < resource.costCredits) return false;
-
-    // Deduct credits
-    ref.read(currentUserProvider.notifier).deductCredits(resource.costCredits);
+    // Deduct credits when available, but never block students with 0 credits
+    // from reading verified class study notes.
+    if (user.credits >= resource.costCredits && resource.costCredits > 0) {
+      ref.read(currentUserProvider.notifier).deductCredits(resource.costCredits);
+    }
 
     // Mark unlocked
     state = state.map((r) {
@@ -968,6 +1099,7 @@ class ResourcesNotifier extends Notifier<List<ResourceModel>> {
     }
 
     final user = ref.read(currentUserProvider);
+    final autoApprove = user.isAdmin || user.isUploaderVerified;
     final newRes = ResourceModel(
       id: UuidUtil.generate(),
       subjectId: subjectId,
@@ -979,7 +1111,7 @@ class ResourcesNotifier extends Notifier<List<ResourceModel>> {
       url: url,
       upvotes: 0,
       costCredits: 5,
-      isApproved: false, // Sent to Admin Mod Queue
+      isApproved: autoApprove,
       isUnlocked: true, // Uploader always has it unlocked
     );
 
@@ -992,7 +1124,8 @@ class ResourcesNotifier extends Notifier<List<ResourceModel>> {
           payload: newRes.toMap(),
         );
     ref.read(syncStateProvider.notifier).refreshPendingCount();
-    ref.read(classRepositoryProvider).saveResource(newRes);
+    final parentSub = resolveSubjectById(ref.read(subjectsProvider), subjectId);
+    ref.read(classRepositoryProvider).saveResource(newRes, subject: parentSub);
 
     // Award +50 credits for contributing notes
     ref.read(currentUserProvider.notifier).addCredits(50);
@@ -1003,7 +1136,11 @@ class ResourcesNotifier extends Notifier<List<ResourceModel>> {
     state = state.map((r) {
       if (r.id == resourceId) {
         final approved = r.copyWith(isApproved: true);
-        ref.read(classRepositoryProvider).saveResource(approved);
+        final parentSub =
+            resolveSubjectById(ref.read(subjectsProvider), approved.subjectId);
+        ref
+            .read(classRepositoryProvider)
+            .saveResource(approved, subject: parentSub);
         ref.read(syncServiceProvider).enqueueMutation(
               entity: 'resource',
               entityId: approved.id,
@@ -1094,9 +1231,39 @@ final likedResourcesProvider =
 
 class AttendanceNotifier
     extends Notifier<Map<String, AttendanceRecord>> {
+  static const String _prefsKey = 'student_attendance_records_v1';
+
   @override
   Map<String, AttendanceRecord> build() {
+    _loadFromPrefs();
     return ClassRepository.initialAttendance;
+  }
+
+  Future<void> _loadFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw) as Map<String, dynamic>;
+        final loaded = <String, AttendanceRecord>{
+          ...ClassRepository.initialAttendance,
+        };
+        for (final entry in decoded.entries) {
+          loaded[entry.key] = AttendanceRecord.fromMap(
+            Map<String, dynamic>.from(entry.value as Map),
+          );
+        }
+        state = loaded;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveToPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encoded = state.map((k, v) => MapEntry(k, v.toMap()));
+      await prefs.setString(_prefsKey, jsonEncode(encoded));
+    } catch (_) {}
   }
 
   void markPresent(String subjectId) {
@@ -1109,6 +1276,7 @@ class AttendanceNotifier
         total: current.total + 1,
       ),
     };
+    _saveToPrefs();
     HapticFeedback.lightImpact();
   }
 
@@ -1121,7 +1289,17 @@ class AttendanceNotifier
         total: current.total + 1,
       ),
     };
+    _saveToPrefs();
     HapticFeedback.mediumImpact();
+  }
+
+  void resetSubjectAttendance(String subjectId) {
+    state = {
+      ...state,
+      subjectId: AttendanceRecord(subjectId: subjectId, attended: 0, total: 0),
+    };
+    _saveToPrefs();
+    HapticFeedback.lightImpact();
   }
 }
 
@@ -1162,12 +1340,18 @@ class AlertModeNotifier extends Notifier<AlertMode> {
       final slots = ref.read(timetableSlotsProvider);
       final subjects = ref.read(subjectsProvider);
       final leadTime = ref.read(alertLeadTimeProvider);
+      final overrides = ref.read(dailyOverridesProvider);
+      final assignments = ref.read(assignmentsProvider);
+      final completed = ref.read(assignmentCompletionProvider);
       final subjectMap = {for (var s in subjects) s.id: s};
       AlertScheduler.instance.syncAllTimetableAlerts(
         slots: slots,
         subjectMap: subjectMap,
         mode: mode,
         leadTimeMinutes: leadTime,
+        overrides: overrides,
+        assignments: assignments,
+        completedAssignmentIds: completed,
       );
     } catch (e) {
       debugPrint('Error syncing timetable alerts: $e');
@@ -1196,12 +1380,18 @@ class AlertLeadTimeNotifier extends Notifier<int> {
       final slots = ref.read(timetableSlotsProvider);
       final subjects = ref.read(subjectsProvider);
       final mode = ref.read(alertModeProvider);
+      final overrides = ref.read(dailyOverridesProvider);
+      final assignments = ref.read(assignmentsProvider);
+      final completed = ref.read(assignmentCompletionProvider);
       final subjectMap = {for (var s in subjects) s.id: s};
       AlertScheduler.instance.syncAllTimetableAlerts(
         slots: slots,
         subjectMap: subjectMap,
         mode: mode,
         leadTimeMinutes: minutes,
+        overrides: overrides,
+        assignments: assignments,
+        completedAssignmentIds: completed,
       );
     } catch (_) {}
   }
@@ -1376,6 +1566,16 @@ class AssignmentCompletionNotifier extends Notifier<Set<String>> {
     state = current;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_keyCompleted, current.toList());
+    _resyncAlertsFromRef(ref);
+  }
+
+  Future<void> markCompleted(String assignmentId) async {
+    if (state.contains(assignmentId)) return;
+    final current = {...state, assignmentId};
+    state = current;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyCompleted, current.toList());
+    _resyncAlertsFromRef(ref);
   }
 
   bool isCompleted(String assignmentId) => state.contains(assignmentId);
@@ -1410,7 +1610,15 @@ class AssignmentsNotifier extends Notifier<List<AssignmentModel>> {
     }
   }
 
-  Future<void> createAssignment({
+  Future<void> reloadFromLocal() async {
+    final cached =
+        await ref.read(classRepositoryProvider).loadCachedAssignments();
+    if (cached != null) {
+      state = cached;
+    }
+  }
+
+  Future<String?> createAssignment({
     required String subjectId,
     required String title,
     required String description,
@@ -1425,7 +1633,7 @@ class AssignmentsNotifier extends Notifier<List<AssignmentModel>> {
       description: description.trim(),
       deadline: deadline,
       driveUrl: driveUrl?.trim().isNotEmpty == true ? driveUrl!.trim() : null,
-      createdBy: user.name,
+      createdBy: user.name.isNotEmpty ? user.name : 'Admin',
       createdAt: DateTime.now(),
     );
 
@@ -1433,20 +1641,281 @@ class AssignmentsNotifier extends Notifier<List<AssignmentModel>> {
       ..sort((a, b) => a.deadline.compareTo(b.deadline));
     final repo = ref.read(classRepositoryProvider);
     await repo.cacheAssignments(state);
-    await repo.saveAssignment(newAssignment);
+    ref.read(syncServiceProvider).enqueueMutation(
+          entity: 'assignment',
+          entityId: newAssignment.id,
+          action: 'upsert',
+          payload: newAssignment.toMap(),
+        );
+    ref.read(syncStateProvider.notifier).refreshPendingCount();
+    final subject = resolveSubjectById(ref.read(subjectsProvider), subjectId);
+    if (subject != null) {
+      await repo.createSubject(subject);
+    }
+    final error = await repo.saveAssignment(newAssignment, subject: subject);
+    _resyncAlertsFromRef(ref);
+    return error;
   }
 
-  Future<void> deleteAssignment(String assignmentId) async {
-    state = state.where((a) => a.id != assignmentId).toList();
+  Future<String?> updateAssignment(AssignmentModel updated) async {
+    final normId = UuidUtil.fromString(updated.id);
+    state = state
+        .map((a) =>
+            (a.id == updated.id || UuidUtil.fromString(a.id) == normId)
+                ? updated
+                : a)
+        .toList()
+      ..sort((a, b) => a.deadline.compareTo(b.deadline));
     final repo = ref.read(classRepositoryProvider);
     await repo.cacheAssignments(state);
-    await repo.deleteAssignment(assignmentId);
+    ref.read(syncServiceProvider).enqueueMutation(
+          entity: 'assignment',
+          entityId: updated.id,
+          action: 'upsert',
+          payload: updated.toMap(),
+        );
+    ref.read(syncStateProvider.notifier).refreshPendingCount();
+    final subject =
+        resolveSubjectById(ref.read(subjectsProvider), updated.subjectId);
+    if (subject != null) {
+      await repo.createSubject(subject);
+    }
+    final error = await repo.saveAssignment(updated, subject: subject);
+    _resyncAlertsFromRef(ref);
+    return error;
+  }
+
+  Future<String?> deleteAssignment(String assignmentId) async {
+    final normId = UuidUtil.fromString(assignmentId);
+    state = state
+        .where(
+            (a) => a.id != assignmentId && UuidUtil.fromString(a.id) != normId)
+        .toList();
+    final repo = ref.read(classRepositoryProvider);
+    await repo.cacheAssignments(state);
+    ref.read(syncServiceProvider).enqueueMutation(
+          entity: 'assignment',
+          entityId: assignmentId,
+          action: 'delete',
+        );
+    ref.read(syncStateProvider.notifier).refreshPendingCount();
+    final error = await repo.deleteAssignment(assignmentId);
+    _resyncAlertsFromRef(ref);
+    return error;
   }
 }
 
 final assignmentsProvider =
     NotifierProvider<AssignmentsNotifier, List<AssignmentModel>>(
         AssignmentsNotifier.new);
+
+// ===================================================================
+// NOTEBOOKLM & MCQ QUIZZES PROVIDERS
+// ===================================================================
+
+class QuizScoreRecord {
+  final String quizId;
+  final int bestScore;
+  final int lastScore;
+  final int totalQuestions;
+  final int attempts;
+  final int creditsEarned;
+  final DateTime lastAttemptAt;
+
+  const QuizScoreRecord({
+    required this.quizId,
+    required this.bestScore,
+    required this.lastScore,
+    required this.totalQuestions,
+    required this.attempts,
+    this.creditsEarned = 0,
+    required this.lastAttemptAt,
+  });
+
+  double get bestPercentage =>
+      totalQuestions > 0 ? (bestScore / totalQuestions) * 100 : 0;
+
+  Map<String, dynamic> toMap() => {
+        'quiz_id': quizId,
+        'best_score': bestScore,
+        'last_score': lastScore,
+        'total_questions': totalQuestions,
+        'attempts': attempts,
+        'credits_earned': creditsEarned,
+        'last_attempt_at': lastAttemptAt.toIso8601String(),
+      };
+
+  factory QuizScoreRecord.fromMap(Map<String, dynamic> map) {
+    final best = (map['best_score'] as num?)?.toInt() ?? 0;
+    return QuizScoreRecord(
+      quizId: map['quiz_id']?.toString() ?? '',
+      bestScore: best,
+      lastScore: (map['last_score'] as num?)?.toInt() ?? 0,
+      totalQuestions: (map['total_questions'] as num?)?.toInt() ?? 1,
+      attempts: (map['attempts'] as num?)?.toInt() ?? 1,
+      creditsEarned: (map['credits_earned'] as num?)?.toInt() ?? best,
+      lastAttemptAt:
+          DateTime.tryParse(map['last_attempt_at']?.toString() ?? '') ??
+              DateTime.now(),
+    );
+  }
+}
+
+class QuizScoreHistoryNotifier extends Notifier<Map<String, QuizScoreRecord>> {
+  static const String _keyScores = 'key_student_quiz_scores_v1';
+
+  @override
+  Map<String, QuizScoreRecord> build() {
+    _load();
+    return const {};
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_keyScores);
+      if (raw != null) {
+        final decoded = jsonDecode(raw) as Map<String, dynamic>;
+        state = decoded.map(
+          (k, v) => MapEntry(
+            k,
+            QuizScoreRecord.fromMap(Map<String, dynamic>.from(v as Map)),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  /// Records a quiz attempt and awards credits based on how many answers are correct
+  /// (+1 Credit per newly achieved correct answer on this quiz so retakes reward improvement!).
+  /// Returns the number of newly awarded credits for this attempt.
+  Future<int> recordScore({
+    required String quizId,
+    required int score,
+    required int totalQuestions,
+  }) async {
+    final existing = state[quizId];
+    final previousBest = existing?.bestScore ?? 0;
+    final newBest = score > previousBest ? score : previousBest;
+    final newlyEarnedCredits = (score - previousBest).clamp(0, totalQuestions);
+
+    if (newlyEarnedCredits > 0) {
+      ref.read(currentUserProvider.notifier).addCredits(newlyEarnedCredits);
+    }
+
+    final updated = QuizScoreRecord(
+      quizId: quizId,
+      bestScore: newBest,
+      lastScore: score,
+      totalQuestions: totalQuestions,
+      attempts: (existing?.attempts ?? 0) + 1,
+      creditsEarned: (existing?.creditsEarned ?? previousBest) + newlyEarnedCredits,
+      lastAttemptAt: DateTime.now(),
+    );
+    state = {...state, quizId: updated};
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final serialized = state.map((k, v) => MapEntry(k, v.toMap()));
+      await prefs.setString(_keyScores, jsonEncode(serialized));
+    } catch (_) {}
+    return newlyEarnedCredits;
+  }
+}
+
+final quizScoreHistoryProvider =
+    NotifierProvider<QuizScoreHistoryNotifier, Map<String, QuizScoreRecord>>(
+        QuizScoreHistoryNotifier.new);
+
+class QuizzesNotifier extends Notifier<List<QuizModel>> {
+  @override
+  List<QuizModel> build() {
+    _init();
+    return ClassRepository.memoryQuizzes ?? const [];
+  }
+
+  Future<void> _init() async {
+    final repo = ref.read(classRepositoryProvider);
+    final cached = await repo.loadCachedQuizzes();
+    if (cached != null) {
+      state = cached;
+    }
+    try {
+      final remote = await repo.fetchQuizzes();
+      if (remote != null) {
+        state = remote;
+        await repo.cacheQuizzes(remote);
+      }
+    } catch (e) {
+      debugPrint('Error fetching quizzes: $e');
+    }
+  }
+
+  Future<void> reloadFromLocal() async {
+    final cached = await ref.read(classRepositoryProvider).loadCachedQuizzes();
+    if (cached != null) {
+      state = cached;
+    }
+  }
+
+  Future<String?> saveQuiz(QuizModel quiz) async {
+    final normId = UuidUtil.fromString(quiz.id);
+    final normalizedQuiz = quiz.copyWith(id: normId);
+    final exists = state.any(
+      (q) => q.id == quiz.id || UuidUtil.fromString(q.id) == normId,
+    );
+    if (exists) {
+      state = state
+          .map((q) => (q.id == quiz.id || UuidUtil.fromString(q.id) == normId)
+              ? normalizedQuiz
+              : q)
+          .toList();
+    } else {
+      state = [normalizedQuiz, ...state];
+    }
+
+    final repo = ref.read(classRepositoryProvider);
+    await repo.cacheQuizzes(state);
+
+    ref.read(syncServiceProvider).enqueueMutation(
+          entity: 'resource',
+          entityId: normalizedQuiz.id,
+          action: 'upsert',
+          payload: normalizedQuiz.toResourcePayload(),
+        );
+    ref.read(syncStateProvider.notifier).refreshPendingCount();
+
+    final subject =
+        resolveSubjectById(ref.read(subjectsProvider), normalizedQuiz.subjectId);
+    if (subject != null) {
+      await repo.createSubject(subject);
+    }
+    final error = await repo.saveQuiz(normalizedQuiz, subject: subject);
+    HapticFeedback.mediumImpact();
+    return error;
+  }
+
+  Future<String?> deleteQuiz(String quizId) async {
+    final normId = UuidUtil.fromString(quizId);
+    state = state
+        .where((q) => q.id != quizId && UuidUtil.fromString(q.id) != normId)
+        .toList();
+    final repo = ref.read(classRepositoryProvider);
+    await repo.cacheQuizzes(state);
+    ref.read(syncServiceProvider).enqueueMutation(
+          entity: 'resource',
+          entityId: normId,
+          action: 'delete',
+        );
+    ref.read(syncStateProvider.notifier).refreshPendingCount();
+    final error = await repo.deleteQuiz(normId);
+    HapticFeedback.selectionClick();
+    return error;
+  }
+}
+
+final quizzesProvider =
+    NotifierProvider<QuizzesNotifier, List<QuizModel>>(QuizzesNotifier.new);
+
 
 
 

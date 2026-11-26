@@ -9,7 +9,12 @@ import '../../models/models.dart';
 import '../../providers/class_providers.dart';
 
 class AssignmentScannerScreen extends ConsumerStatefulWidget {
-  const AssignmentScannerScreen({super.key});
+  final AssignmentModel? initialAssignment;
+
+  const AssignmentScannerScreen({
+    super.key,
+    this.initialAssignment,
+  });
 
   @override
   ConsumerState<AssignmentScannerScreen> createState() =>
@@ -18,15 +23,60 @@ class AssignmentScannerScreen extends ConsumerStatefulWidget {
 
 class _AssignmentScannerScreenState
     extends ConsumerState<AssignmentScannerScreen> {
-  final _titleCtrl = TextEditingController(text: 'Lab Assignment 1');
+  late final TextEditingController _titleCtrl;
   ImagePicker? _lazyPicker;
   ImagePicker get _imagePicker => _lazyPicker ??= ImagePicker();
 
+  AssignmentModel? _linkedAssignment;
   String? _selectedSubject;
   final List<AssignmentPhoto> _photos = [];
   bool _isProcessingImage = false;
   bool _isGeneratingPdf = false;
   Uint8List? _generatedPdfBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _linkedAssignment = widget.initialAssignment;
+    _titleCtrl = TextEditingController(
+      text: widget.initialAssignment?.title ?? 'Lab Assignment 1',
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final subjects = ref.read(subjectsProvider);
+      if (_linkedAssignment != null) {
+        final sub = resolveSubjectById(subjects, _linkedAssignment!.subjectId);
+        if (sub != null) {
+          setState(() {
+            _selectedSubject = '${sub.code} - ${sub.name}';
+          });
+        }
+      } else {
+        // Auto-select first pending assignment if available
+        final completed = ref.read(assignmentCompletionProvider);
+        final pending = ref
+            .read(assignmentsProvider)
+            .where((a) => !completed.contains(a.id))
+            .toList();
+        if (pending.isNotEmpty) {
+          _applyAssignmentSelection(pending.first, subjects);
+        }
+      }
+    });
+  }
+
+  void _applyAssignmentSelection(
+      AssignmentModel assignment, List<SubjectModel> subjects) {
+    final sub = resolveSubjectById(subjects, assignment.subjectId);
+    setState(() {
+      _linkedAssignment = assignment;
+      _titleCtrl.text = assignment.title;
+      if (sub != null) {
+        _selectedSubject = '${sub.code} - ${sub.name}';
+      }
+      _generatedPdfBytes = null;
+    });
+  }
 
   @override
   void dispose() {
@@ -510,6 +560,10 @@ class _AssignmentScannerScreenState
   }
 
   void _showSaveSuccessDialog(String path) {
+    final linked = _linkedAssignment;
+    final isAlreadyDone = linked != null &&
+        ref.read(assignmentCompletionProvider).contains(linked.id);
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -547,18 +601,69 @@ class _AssignmentScannerScreenState
                 ),
               ),
             ),
+            if (linked != null && !isAlreadyDone) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.task_alt_rounded,
+                        size: 16, color: AppColors.success),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Linked to "${linked.title}". Mark it completed in your Assignment Tracker?',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF166534),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
         actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+          if (linked != null && !isAlreadyDone)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Later'),
             ),
-            child: const Text('Great!'),
-          ),
+          if (linked != null && !isAlreadyDone)
+            FilledButton.icon(
+              onPressed: () {
+                ref
+                    .read(assignmentCompletionProvider.notifier)
+                    .markCompleted(linked.id);
+                Navigator.pop(ctx);
+                _showSnackbar('Marked "${linked.title}" as completed!');
+              },
+              icon: const Icon(Icons.check_rounded, size: 16),
+              label: const Text('Mark Completed'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.success,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            )
+          else
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Great!'),
+            ),
         ],
       ),
     );
@@ -1072,6 +1177,11 @@ class _AssignmentScannerScreenState
   }
 
   Widget _buildAssignmentDetailsCard(List<SubjectModel> subjects) {
+    final allAssignments = ref.watch(assignmentsProvider);
+    final completedIds = ref.watch(assignmentCompletionProvider);
+    final pendingAssignments =
+        allAssignments.where((a) => !completedIds.contains(a.id)).toList();
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1082,6 +1192,73 @@ class _AssignmentScannerScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (pendingAssignments.isNotEmpty) ...[
+            Row(
+              children: [
+                const Icon(Icons.assignment_turned_in_rounded,
+                    size: 16, color: AppColors.primary),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text(
+                    'Link to Class Assignment (Auto-fills Title & Course):',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+                if (_linkedAssignment != null)
+                  InkWell(
+                    onTap: () => setState(() => _linkedAssignment = null),
+                    child: const Text(
+                      'Unlink',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: pendingAssignments.map((a) {
+                  final sub = resolveSubjectById(subjects, a.subjectId);
+                  final isSelected = _linkedAssignment?.id == a.id;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(
+                        sub != null ? '${sub.code}: ${a.title}' : a.title,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color:
+                              isSelected ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      selected: isSelected,
+                      selectedColor: AppColors.primary,
+                      onSelected: (sel) {
+                        if (sel) {
+                          _applyAssignmentSelection(a, subjects);
+                        } else {
+                          setState(() => _linkedAssignment = null);
+                        }
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: AppColors.border),
+            const SizedBox(height: 12),
+          ],
           Row(
             children: const [
               Icon(Icons.title_rounded, size: 18, color: AppColors.textPrimary),

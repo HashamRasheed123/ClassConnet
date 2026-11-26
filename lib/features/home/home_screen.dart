@@ -12,6 +12,7 @@ import '../../models/models.dart';
 import '../../providers/class_providers.dart';
 import '../assignment_scanner/assignment_scanner_screen.dart';
 import '../assignments/assignment_tracker_screen.dart';
+import '../quizzes/quiz_center_screen.dart';
 import '../vault/vault_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -32,12 +33,13 @@ class HomeScreen extends ConsumerWidget {
     final syncState = ref.watch(syncStateProvider);
     final allAssignments = ref.watch(assignmentsProvider);
     final completedAssignmentIds = ref.watch(assignmentCompletionProvider);
+    final allQuizzes = ref.watch(quizzesProvider);
     final subjects = ref.watch(subjectsProvider);
     final subjectMap = {for (var s in subjects) s.id: s};
 
     final dueTomorrowAssignments = allAssignments.where((a) {
       final isDone = completedAssignmentIds.contains(a.id);
-      return !isDone && (a.isDueTomorrow || a.isDueToday);
+      return !isDone && (a.isOverdue || a.isDueToday || a.isDueTomorrow);
     }).toList();
 
     final now = DateTime.now();
@@ -294,6 +296,20 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
 
+            // ACTIVE LECTURE / MEETING ALARM PANEL (Brought to front when alarm rings)
+            SliverToBoxAdapter(
+              child: ValueListenableBuilder<ActiveLectureAlarm?>(
+                valueListenable: AlertScheduler.instance.activeAlarmNotifier,
+                builder: (context, activeAlarm, _) {
+                  if (activeAlarm == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                    child: _ActiveMeetingAlarmPanel(alarm: activeAlarm),
+                  );
+                },
+              ),
+            ),
+
             // URGENT ASSIGNMENTS DUE TOMORROW BANNER
             if (dueTomorrowAssignments.isNotEmpty)
               SliverToBoxAdapter(
@@ -503,6 +519,111 @@ class HomeScreen extends ConsumerWidget {
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+
+            // NOTEBOOKLM & COURSE MCQ QUIZ CENTER QUICK LAUNCHER
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: InkWell(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const QuizCenterScreen(),
+                    ),
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppColors.primary.withValues(alpha: 0.25),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.06),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                          child: const Icon(
+                            Icons.psychology_alt_rounded,
+                            color: AppColors.primary,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'MCQ Quizzes & Practice Tests',
+                                style: TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'NotebookLM Quizzes • Check MCQs or Take Scored Test',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${allQuizzes.length} Quizzes',
+                            style: const TextStyle(
+                              color: AppColors.primary,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.primary,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -748,6 +869,10 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
     String statusTitle;
     if (isLive) {
       statusTitle = 'LIVE NOW';
+    } else if (l.isTimeChanged) {
+      statusTitle = isToday ? 'TIME UPDATED • TODAY' : 'TIME UPDATED • ${dayName.toUpperCase()}';
+    } else if (l.isDayRescheduled) {
+      statusTitle = isToday ? 'RESCHEDULED • TODAY' : 'RESCHEDULED • ${dayName.toUpperCase()}';
     } else if (isToday) {
       statusTitle = 'UPCOMING LECTURE';
     } else {
@@ -758,9 +883,9 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
     if (isLive) {
       timerSubtitle = 'CLASS ENDS IN';
     } else if (isToday) {
-      timerSubtitle = 'STARTS TODAY IN';
+      timerSubtitle = 'STARTS TODAY AT ${l.formattedStartTime} IN';
     } else {
-      timerSubtitle = 'STARTS ${dayName.toUpperCase()} AT ${l.slot.formattedStartTime} IN';
+      timerSubtitle = 'STARTS ${dayName.toUpperCase()} AT ${l.formattedStartTime} IN';
     }
 
     return Container(
@@ -847,147 +972,183 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
                                   ? SnackBarAction(
                                       label: 'Test Alarm',
                                       textColor: Colors.amberAccent,
-                                      onPressed: () {
-                                        AlertScheduler.instance.testAlarmNow(
-                                          mode: newMode,
-                                          subjectName: l.subject.name,
-                                          room: l.effectiveRoom,
-                                        );
-                                      },
-                                    )
-                                  : null,
+                                        onPressed: () {
+                                          AlertScheduler.instance.testAlarmNow(
+                                            mode: newMode,
+                                            subjectName: l.subject.name,
+                                            subjectCode: l.subject.code,
+                                            professor: l.subject.professor,
+                                            room: l.effectiveRoom,
+                                            timeRangeFormatted:
+                                                l.formattedTimeRange,
+                                          );
+                                        },
+                                      )
+                                    : null,
+                              ),
+                            );
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.35),
+                              width: 1,
                             ),
-                          );
-                        }
-                      },
-                      borderRadius: BorderRadius.circular(999),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.35),
-                            width: 1,
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(alertMode.emoji,
-                                style: const TextStyle(fontSize: 12)),
-                            const SizedBox(width: 5),
-                            Text(
-                              alertMode.label,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(alertMode.emoji,
+                                  style: const TextStyle(fontSize: 12)),
+                              const SizedBox(width: 5),
+                              Text(
+                                alertMode.label,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-
-                // Center Ticking Timer
-                Text(
-                  timerSubtitle,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.75),
-                    fontSize: 11,
-                    letterSpacing: 1.4,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _formatDuration(_remaining),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const SizedBox(height: 18),
-
-                // Bottom details
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.location_on_rounded,
-                            size: 18, color: Colors.white),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l.subject.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${l.effectiveRoom} · ${l.subject.professor}',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.8),
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          l.slot.formattedTimeRange,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
+                            ],
                           ),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 18),
+
+                  // Center Ticking Timer
+                  Text(
+                    timerSubtitle,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.75),
+                      fontSize: 11,
+                      letterSpacing: 1.4,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatDuration(_remaining),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Bottom details
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.location_on_rounded,
+                              size: 18, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                l.subject.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${l.effectiveRoom} · ${l.subject.professor}',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.8),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: l.isTimeChanged
+                                ? const Color(0xFFF59E0B).withValues(alpha: 0.35)
+                                : Colors.white.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: l.isTimeChanged
+                                ? Border.all(
+                                    color: Colors.amberAccent.withValues(alpha: 0.6))
+                                : null,
+                          ),
+                          child: Text(
+                            l.formattedTimeRange,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (l.hasMeetingUrl) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () =>
+                            Formatters.launchMeetingUrl(context, l.meetingUrl),
+                        icon: const Icon(Icons.video_call_rounded, size: 20),
+                        label: const Text(
+                          'Join Class Meeting',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    }
   }
-}
 
 // ===================================================================
 // TIMELINE CARD FOR EACH LECTURE TODAY
@@ -1008,18 +1169,30 @@ class LectureTimelineCard extends StatelessWidget {
     final l = item;
     final isCancelled = l.isCancelled;
     final isRoomChanged = l.isRoomChanged;
+    final isTimeChanged = l.isTimeChanged;
+    final isDayRescheduled = l.isDayRescheduled;
+    final isDayMovedAway = l.isDayMovedAway;
+    final isModified = isRoomChanged || isTimeChanged || isDayRescheduled;
 
     final statusColor = isCancelled
         ? AppColors.danger
-        : isRoomChanged
+        : isModified
             ? AppColors.warning
             : AppColors.success;
 
     final statusLabel = isCancelled
         ? 'Cancelled'
-        : isRoomChanged
-            ? 'Room Changed'
-            : 'Scheduled';
+        : isDayMovedAway
+            ? 'Moved to Another Day'
+            : (isTimeChanged && isRoomChanged)
+                ? 'Time & Room Updated'
+                : isTimeChanged
+                    ? 'Time Updated'
+                    : isRoomChanged
+                        ? 'Room Changed'
+                        : isDayRescheduled
+                            ? 'Rescheduled'
+                            : 'Scheduled';
 
     return Container(
       decoration: BoxDecoration(
@@ -1028,8 +1201,10 @@ class LectureTimelineCard extends StatelessWidget {
         border: Border.all(
           color: isCancelled
               ? AppColors.danger.withValues(alpha: 0.4)
-              : AppColors.border,
-          width: isCancelled ? 1.4 : 1.0,
+              : isModified
+                  ? AppColors.warning.withValues(alpha: 0.45)
+                  : AppColors.border,
+          width: (isCancelled || isModified) ? 1.4 : 1.0,
         ),
         boxShadow: AppShadows.card,
       ),
@@ -1058,15 +1233,40 @@ class LectureTimelineCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  l.slot.formattedTimeRange,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isTimeChanged) ...[
+                        Text(
+                          l.slot.formattedStartTime,
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 11,
+                            decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Flexible(
+                        child: Text(
+                          l.formattedTimeRange,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isTimeChanged
+                                ? const Color(0xFFB45309)
+                                : AppColors.textSecondary,
+                            fontSize: 13,
+                            fontWeight: isTimeChanged
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 6),
                 // Status pill
                 Container(
                   padding:
@@ -1150,6 +1350,35 @@ class LectureTimelineCard extends StatelessWidget {
                     fontSize: 12,
                     color: Color(0xFF475569),
                     fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ],
+
+            if (l.hasMeetingUrl) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: () =>
+                      Formatters.launchMeetingUrl(context, l.meetingUrl),
+                  icon: const Icon(Icons.video_call_rounded, size: 18),
+                  label: const Text(
+                    'Join Class Meeting',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primarySoft,
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: BorderSide(
+                          color: AppColors.primary.withValues(alpha: 0.25)),
+                    ),
                   ),
                 ),
               ),
@@ -1461,7 +1690,245 @@ class _ReportUpdateModalState extends ConsumerState<ReportUpdateModal> {
 }
 
 // ===================================================================
-// URGENT ASSIGNMENTS DUE TOMORROW BANNER
+// LIVE MEETING / LECTURE ALARM PANEL (SHOWN ON HOME SCREEN)
+// ===================================================================
+
+class _ActiveMeetingAlarmPanel extends StatelessWidget {
+  final ActiveLectureAlarm alarm;
+
+  const _ActiveMeetingAlarmPanel({required this.alarm});
+
+  @override
+  Widget build(BuildContext context) {
+    final isRinging = alarm.isRinging;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFDC2626), Color(0xFF991B1B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Colors.amberAccent.withValues(alpha: 0.7),
+          width: 1.8,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFDC2626).withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isRinging
+                          ? Icons.notifications_active_rounded
+                          : Icons.event_available_rounded,
+                      color: Colors.amberAccent,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isRinging
+                          ? 'LIVE MEETING ALARM • RINGING'
+                          : (alarm.isUpdated
+                              ? 'MEETING TIME UPDATED'
+                              : 'MEETING STARTING NOW'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  alarm.subjectCode,
+                  style: const TextStyle(
+                    color: Colors.amberAccent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            alarm.subjectName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.access_time_filled_rounded,
+                  size: 15, color: Colors.amberAccent),
+              const SizedBox(width: 6),
+              Text(
+                alarm.timeRangeFormatted,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Icon(Icons.location_on_rounded,
+                  size: 15, color: Colors.white70),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  '${alarm.room} • ${alarm.professor}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (alarm.topicCovered != null &&
+              alarm.topicCovered!.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Note: ${alarm.topicCovered}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+          if (alarm.meetingUrl != null &&
+              alarm.meetingUrl!.trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => Formatters.launchMeetingUrl(
+                    context, alarm.meetingUrl),
+                icon: const Icon(Icons.video_call_rounded, size: 19),
+                label: const Text(
+                  'Join Class Meeting Now',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.amberAccent,
+                  foregroundColor: const Color(0xFF7F1D1D),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              if (isRinging) ...[
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      HapticFeedback.heavyImpact();
+                      AlertScheduler.instance
+                          .stopActiveAlarm(dismissPanel: false);
+                    },
+                    icon: const Icon(Icons.volume_off_rounded, size: 18),
+                    label: const Text(
+                      'Stop Ringing',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFFDC2626),
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    AlertScheduler.instance.stopActiveAlarm(dismissPanel: true);
+                  },
+                  icon: const Icon(Icons.check_circle_outline_rounded,
+                      size: 17, color: Colors.white),
+                  label: Text(
+                    isRinging ? 'Dismiss' : 'Close Panel',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.6), width: 1.2),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ===================================================================
+// URGENT ASSIGNMENTS BANNER
 // ===================================================================
 
 class UrgentAssignmentsBanner extends ConsumerWidget {
@@ -1477,6 +1944,10 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (assignments.isEmpty) return const SizedBox.shrink();
+    final subjects = subjectMap.values.toList();
+    final hasOverdueOrToday =
+        assignments.any((a) => a.isOverdue || a.isDueToday);
+    final headerText = hasOverdueOrToday ? 'URGENT DEADLINES' : 'DUE TOMORROW';
 
     return Container(
       decoration: BoxDecoration(
@@ -1518,9 +1989,9 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                     children: [
                       Row(
                         children: [
-                          const Text(
-                            'DUE TOMORROW',
-                            style: TextStyle(
+                          Text(
+                            headerText,
+                            style: const TextStyle(
                               color: Color(0xFFB45309),
                               fontWeight: FontWeight.w900,
                               fontSize: 12,
@@ -1548,7 +2019,7 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                       ),
                       const SizedBox(height: 2),
                       const Text(
-                        'Mark complete when finished • Stored on your device only',
+                        'Tap Scan PDF to prepare submission or check off when done',
                         style: TextStyle(
                           color: Color(0xFF92400E),
                           fontSize: 11,
@@ -1600,7 +2071,13 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
             separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final a = assignments[index];
-              final subject = subjectMap[a.subjectId];
+              final subject =
+                  resolveSubjectById(subjects, a.subjectId) ??
+                  subjectMap[a.subjectId];
+              final badgeLabel = a.isOverdue
+                  ? 'OVERDUE'
+                  : (a.isDueToday ? 'DUE TODAY' : 'TOMORROW');
+
               return Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -1673,7 +2150,7 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    subject?.name ?? 'Subject',
+                                    subject?.name ?? 'Course Assignment',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
@@ -1691,7 +2168,7 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
-                                    a.isDueToday ? 'DUE TODAY' : 'TOMORROW',
+                                    badgeLabel,
                                     style: const TextStyle(
                                       color: Color(0xFFDC2626),
                                       fontSize: 9,
@@ -1728,12 +2205,49 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                                 const Icon(Icons.schedule_rounded,
                                     size: 12, color: Color(0xFFB45309)),
                                 const SizedBox(width: 4),
-                                Text(
-                                  a.formattedDeadline,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFFB45309),
+                                Expanded(
+                                  child: Text(
+                                    a.formattedDeadline,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFFB45309),
+                                    ),
+                                  ),
+                                ),
+                                InkWell(
+                                  onTap: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => AssignmentScannerScreen(
+                                        initialAssignment: a,
+                                      ),
+                                    ),
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primarySoft,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.document_scanner_rounded,
+                                            size: 11, color: AppColors.primary),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Scan PDF',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ],

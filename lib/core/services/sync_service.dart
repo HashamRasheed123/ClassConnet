@@ -84,12 +84,14 @@ class SyncService {
   static const String _keyLastSyncedAt = 'sync_last_synced_timestamp';
 
   final ClassRepository repository;
-  final SupabaseClient? client;
+  final SupabaseClient? _injectedClient;
 
   SyncService({
     required this.repository,
-    this.client,
-  });
+    SupabaseClient? client,
+  }) : _injectedClient = client;
+
+  SupabaseClient? get client => _injectedClient ?? repository.client;
 
   bool get canSync =>
       client != null && AppConfig.isSupabaseConfigured;
@@ -168,6 +170,14 @@ class SyncService {
       future.timeout(const Duration(seconds: 8));
 
   Future<SyncResult> performSync() async {
+    if (client == null && AppConfig.isSupabaseConfigured) {
+      try {
+        await Supabase.initialize(
+          url: AppConfig.supabaseUrl,
+          publishableKey: AppConfig.supabaseKey,
+        );
+      } catch (_) {}
+    }
     if (!canSync) {
       return const SyncResult(
         success: false,
@@ -179,6 +189,18 @@ class SyncService {
     final pending = await getPendingMutations();
     int pushedCount = 0;
     final remainingFailed = <PendingMutation>[];
+
+    // Preload current local subjects & slots so foreign-key parent rows can be auto-upserted
+    final localSubjects =
+        await repository.loadCachedSubjects() ?? ClassRepository.mockSubjects;
+    final localSlots =
+        await repository.loadCachedSlots() ?? ClassRepository.mockSlots;
+    final subjectById = {
+      for (final s in localSubjects) UuidUtil.fromString(s.id): s,
+    };
+    final slotById = {
+      for (final sl in localSlots) UuidUtil.fromString(sl.id): sl,
+    };
 
     // 1. PUSH DELTAS: only process pending unsynced mutations with strict 8s timeout
     for (final mutation in pending) {
@@ -203,7 +225,16 @@ class SyncService {
               final payload = Map<String, dynamic>.from(mutation.payload!);
               payload['id'] = UuidUtil.fromString(payload['id']?.toString() ?? mutation.id);
               if (payload['subject_id'] != null) {
-                payload['subject_id'] = UuidUtil.fromString(payload['subject_id'].toString());
+                final subId = UuidUtil.fromString(payload['subject_id'].toString());
+                payload['subject_id'] = subId;
+                final parentSub = subjectById[subId];
+                if (parentSub != null) {
+                  final subPayload = parentSub.toMap();
+                  subPayload['id'] = subId;
+                  try {
+                    await _withTimeout(client!.from('subjects').upsert(subPayload));
+                  } catch (_) {}
+                }
               }
               await _withTimeout(client!.from('timetable_slots').upsert(payload));
               success = true;
@@ -216,31 +247,49 @@ class SyncService {
 
           case 'override':
             if (mutation.action == 'upsert' && mutation.payload != null) {
-              final payload = Map<String, dynamic>.from(mutation.payload!);
-              payload['id'] = UuidUtil.fromString(payload['id']?.toString() ?? mutation.id);
-              if (payload['slot_id'] != null) {
-                payload['slot_id'] = UuidUtil.fromString(payload['slot_id'].toString());
-              }
-              if (payload['reported_by'] != null && !UuidUtil.isValidUuid(payload['reported_by'].toString())) {
-                payload.remove('reported_by');
-              }
-              try {
-                await _withTimeout(client!.from('daily_overrides').upsert(payload));
-              } catch (e) {
-                if (e.toString().contains('column') || e.toString().contains('PGRST204')) {
-                  final fallback = Map<String, dynamic>.from(payload)
-                    ..remove('actual_start_time')
-                    ..remove('actual_end_time')
-                    ..remove('rescheduled_date');
-                  await _withTimeout(client!.from('daily_overrides').upsert(fallback));
-                } else {
-                  rethrow;
-                }
-              }
+              final rawSlotId = mutation.payload!['slot_id']?.toString();
+              final normSlotId = rawSlotId != null ? UuidUtil.fromString(rawSlotId) : null;
+              final parentSlot = normSlotId != null ? slotById[normSlotId] : null;
+              final parentSub = parentSlot != null
+                  ? subjectById[UuidUtil.fromString(parentSlot.subjectId)]
+                  : null;
+              await _withTimeout(ClassRepository.upsertOverrideRow(
+                client!,
+                mutation.payload!,
+                fallbackId: mutation.id,
+                slot: parentSlot,
+                subject: parentSub,
+              ));
               success = true;
             } else if (mutation.action == 'delete') {
               final id = UuidUtil.fromString(mutation.id);
               await _withTimeout(client!.from('daily_overrides').delete().eq('id', id));
+              success = true;
+            }
+            break;
+
+          case 'assignment':
+            if (mutation.action == 'upsert' && mutation.payload != null) {
+              final rawSubId = mutation.payload!['subject_id']?.toString();
+              if (rawSubId != null) {
+                final parentSub = subjectById[UuidUtil.fromString(rawSubId)];
+                if (parentSub != null) {
+                  final subPayload = parentSub.toMap();
+                  subPayload['id'] = UuidUtil.fromString(parentSub.id);
+                  try {
+                    await _withTimeout(client!.from('subjects').upsert(subPayload));
+                  } catch (_) {}
+                }
+              }
+              await _withTimeout(ClassRepository.upsertAssignmentRow(
+                client!,
+                mutation.payload!,
+                fallbackId: mutation.id,
+              ));
+              success = true;
+            } else if (mutation.action == 'delete') {
+              final id = UuidUtil.fromString(mutation.id);
+              await _withTimeout(client!.from('assignments').delete().eq('id', id));
               success = true;
             }
             break;
@@ -250,12 +299,32 @@ class SyncService {
               final payload = Map<String, dynamic>.from(mutation.payload!);
               payload['id'] = UuidUtil.fromString(payload['id']?.toString() ?? mutation.id);
               if (payload['subject_id'] != null) {
-                payload['subject_id'] = UuidUtil.fromString(payload['subject_id'].toString());
+                final subId = UuidUtil.fromString(payload['subject_id'].toString());
+                payload['subject_id'] = subId;
+                final parentSub = subjectById[subId];
+                if (parentSub != null) {
+                  final subPayload = parentSub.toMap();
+                  subPayload['id'] = subId;
+                  try {
+                    await _withTimeout(client!.from('subjects').upsert(subPayload));
+                  } catch (_) {}
+                }
               }
               if (payload['uploader_id'] != null && !UuidUtil.isValidUuid(payload['uploader_id'].toString())) {
                 payload.remove('uploader_id');
               }
-              await _withTimeout(client!.from('resources').upsert(payload));
+              try {
+                await _withTimeout(client!.from('resources').upsert(payload));
+              } catch (e) {
+                final s = e.toString().toLowerCase();
+                if ((s.contains('23503') || s.contains('foreign key')) &&
+                    payload.containsKey('uploader_id')) {
+                  payload.remove('uploader_id');
+                  await _withTimeout(client!.from('resources').upsert(payload));
+                } else {
+                  rethrow;
+                }
+              }
               success = true;
             } else if (mutation.action == 'delete') {
               final id = UuidUtil.fromString(mutation.id);
@@ -308,6 +377,11 @@ class SyncService {
       final remoteAssignments = await _withTimeout(repository.fetchAssignments());
       if (remoteAssignments != null) {
         await repository.cacheAssignments(remoteAssignments);
+      }
+
+      final remoteQuizzes = await _withTimeout(repository.fetchQuizzes());
+      if (remoteQuizzes != null) {
+        await repository.cacheQuizzes(remoteQuizzes);
       }
 
       if (remainingFailed.isEmpty) {

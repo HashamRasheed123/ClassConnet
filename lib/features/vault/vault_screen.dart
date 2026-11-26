@@ -3,10 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/services/offline_document_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/google_drive_util.dart';
+import '../../core/utils/uuid_util.dart';
 import '../../models/models.dart';
 import '../../providers/class_providers.dart';
 import '../assignment_scanner/assignment_scanner_screen.dart';
+import '../quizzes/quiz_center_screen.dart';
 
 class VaultScreen extends ConsumerStatefulWidget {
   const VaultScreen({super.key});
@@ -20,10 +24,27 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
   String _searchQuery = '';
   bool _showVideos = false; // false = Notes & Slides, true = Lecture Videos
   bool _onlyMyUploads = false; // Filter to show user's own contributions
+  bool _onlyOfflineSaved = false; // Filter to show offline-cached documents
   final TextEditingController _searchCtrl = TextEditingController();
+
+  void _onOfflineCacheChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    OfflineDocumentService.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+    OfflineDocumentService.instance.cacheVersionNotifier
+        .addListener(_onOfflineCacheChanged);
+  }
 
   @override
   void dispose() {
+    OfflineDocumentService.instance.cacheVersionNotifier
+        .removeListener(_onOfflineCacheChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -37,6 +58,11 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
 
     final myUploadsCount =
         allResources.where((r) => r.uploaderId == user.id).length;
+    final offlineSavedCount = allResources
+        .where((r) =>
+            r.type != ResourceType.youtube &&
+            OfflineDocumentService.instance.peekCachedEntry(r.url) != null)
+        .length;
 
     // Filter only approved resources (or uploaded by current user)
     final filtered = allResources.where((r) {
@@ -45,12 +71,21 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
       // Only my uploads filter
       if (_onlyMyUploads && r.uploaderId != user.id) return false;
 
+      // Offline saved filter
+      if (_onlyOfflineSaved &&
+          OfflineDocumentService.instance.peekCachedEntry(r.url) == null) {
+        return false;
+      }
+
       // Type filter
       if (_showVideos && r.type != ResourceType.youtube) return false;
       if (!_showVideos && r.type == ResourceType.youtube) return false;
 
-      // Subject filter
-      if (_selectedSubjectId != null && r.subjectId != _selectedSubjectId) {
+      // Subject filter (with normalized UUID resolution)
+      if (_selectedSubjectId != null &&
+          r.subjectId != _selectedSubjectId &&
+          UuidUtil.fromString(r.subjectId) !=
+              UuidUtil.fromString(_selectedSubjectId!)) {
         return false;
       }
 
@@ -68,6 +103,17 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
       appBar: AppBar(
         title: const Text('Academic Vault'),
         actions: [
+          IconButton(
+            tooltip: 'MCQ Quizzes & Practice Tests',
+            icon: const Icon(
+              Icons.psychology_alt_rounded,
+              color: AppColors.primary,
+            ),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const QuizCenterScreen()),
+            ),
+          ),
           IconButton(
             tooltip: 'Assignment PDF Maker (Offline)',
             icon: const Icon(Icons.document_scanner_rounded,
@@ -298,14 +344,44 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                 children: [
                   ChoiceChip(
                     label: const Text('All Resources'),
-                    selected: _selectedSubjectId == null && !_onlyMyUploads,
+                    selected: _selectedSubjectId == null &&
+                        !_onlyMyUploads &&
+                        !_onlyOfflineSaved,
                     onSelected: (val) {
                       if (val) {
                         setState(() {
                           _selectedSubjectId = null;
                           _onlyMyUploads = false;
+                          _onlyOfflineSaved = false;
                         });
                       }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+
+                  // Offline Saved Chip
+                  ChoiceChip(
+                    avatar: Icon(
+                      Icons.offline_pin_rounded,
+                      size: 14,
+                      color: _onlyOfflineSaved
+                          ? Colors.white
+                          : const Color(0xFF059669),
+                    ),
+                    label: Text('Offline Saved ($offlineSavedCount)'),
+                    selected: _onlyOfflineSaved,
+                    selectedColor: const Color(0xFF059669),
+                    labelStyle: TextStyle(
+                      color: _onlyOfflineSaved
+                          ? Colors.white
+                          : AppColors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    onSelected: (val) {
+                      setState(() {
+                        _onlyOfflineSaved = val;
+                        if (val) _onlyMyUploads = false;
+                      });
                     },
                   ),
                   const SizedBox(width: 8),
@@ -323,6 +399,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                     onSelected: (val) {
                       setState(() {
                         _onlyMyUploads = val;
+                        if (val) _onlyOfflineSaved = false;
                       });
                     },
                   ),
@@ -331,12 +408,14 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                   for (final sub in subjects) ...[
                     ChoiceChip(
                       label: Text(sub.code),
-                      selected:
-                          _selectedSubjectId == sub.id && !_onlyMyUploads,
+                      selected: _selectedSubjectId == sub.id &&
+                          !_onlyMyUploads &&
+                          !_onlyOfflineSaved,
                       onSelected: (val) {
                         setState(() {
                           _selectedSubjectId = val ? sub.id : null;
                           _onlyMyUploads = false;
+                          _onlyOfflineSaved = false;
                         });
                       },
                     ),
@@ -498,7 +577,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
 
     // If it's the user's own upload or already unlocked
     if (res.isUnlocked || res.uploaderId == user.id) {
-      _openResourceUrl(res.url);
+      await _openOrCacheResource(res);
       return;
     }
 
@@ -506,23 +585,30 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
         ref.read(resourcesProvider.notifier).unlockResource(res.id);
 
     if (success) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              'Unlocked "${res.title}" (-5 ⚡ Credits). Opening resource...'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      _openResourceUrl(res.url);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Insufficient credits! Contribute lecture notes to earn +50 ⚡.'),
-          backgroundColor: AppColors.danger,
+          content: Text('Opening "${res.title}"...'),
+          duration: const Duration(seconds: 1),
         ),
       );
     }
+    await _openOrCacheResource(res);
+  }
+
+  Future<void> _openOrCacheResource(ResourceModel res) async {
+    if (res.type == ResourceType.youtube) {
+      await _openResourceUrl(res.url);
+      return;
+    }
+    await OfflineDocumentService.instance.openOrDownloadDocument(
+      context,
+      url: res.url,
+      title: res.title,
+      onCacheUpdated: () {
+        if (mounted) setState(() {});
+      },
+    );
   }
 
   Future<void> _openResourceUrl(String url) async {
@@ -663,14 +749,10 @@ class _ResourceCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: isLocked
-                              ? const Color(0xFFFEF3C7) // Amber
-                              : AppColors.primarySoft,
+                          color: AppColors.primarySoft,
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
-                            color: isLocked
-                                ? AppColors.warning.withValues(alpha: 0.3)
-                                : AppColors.primary.withValues(alpha: 0.2),
+                            color: AppColors.primary.withValues(alpha: 0.2),
                           ),
                         ),
                         child: Row(
@@ -678,20 +760,16 @@ class _ResourceCard extends StatelessWidget {
                           children: [
                             Icon(
                               isLocked
-                                  ? Icons.lock_outline_rounded
+                                  ? Icons.menu_book_rounded
                                   : Icons.lock_open_rounded,
                               size: 11,
-                              color: isLocked
-                                  ? AppColors.warning
-                                  : AppColors.primary,
+                              color: AppColors.primary,
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              isLocked ? '5 ⚡ to Unlock' : 'Unlocked',
-                              style: TextStyle(
-                                color: isLocked
-                                    ? AppColors.warning
-                                    : AppColors.primary,
+                              isLocked ? 'Free Read' : 'Unlocked',
+                              style: const TextStyle(
+                                color: AppColors.primary,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -713,7 +791,100 @@ class _ResourceCard extends StatelessWidget {
                     height: 1.35,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+
+                // Offline Storage Status Row (for PDFs and Images)
+                if (res.type != ResourceType.youtube) ...[
+                  Builder(
+                    builder: (context) {
+                      final isFolder =
+                          GoogleDriveUtil.isGoogleDriveFolder(res.url);
+                      if (isFolder) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: const Color(0xFFBFDBFE),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.folder_shared_rounded,
+                                size: 14,
+                                color: AppColors.primary,
+                              ),
+                              SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'Google Drive Folder • Tap to Open & Browse Files',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      final cached = OfflineDocumentService.instance
+                          .peekCachedEntry(res.url);
+                      final isCached = cached != null;
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isCached
+                              ? const Color(0xFFECFDF5)
+                              : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isCached
+                                ? const Color(0xFFA7F3D0)
+                                : AppColors.border,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isCached
+                                  ? Icons.offline_pin_rounded
+                                  : Icons.download_for_offline_outlined,
+                              size: 14,
+                              color: isCached
+                                  ? const Color(0xFF059669)
+                                  : AppColors.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                isCached
+                                    ? 'Offline Ready (${cached.formattedSize}) • Tap to Open Instantly'
+                                    : 'Tap to Download & Save for Offline Access',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: isCached
+                                      ? const Color(0xFF065F46)
+                                      : AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                ],
 
                 // Bottom row: Uploader name + Upvotes
                 Row(
@@ -1433,8 +1604,18 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
     final finalUrl = _urlCtrl.text.trim().isNotEmpty
         ? _urlCtrl.text.trim()
         : (_pickedFile != null
-            ? 'https://storage.supabase.co/v1/object/public/lecture-notes/${_pickedFile!.name}'
+            ? 'local://vault/${UuidUtil.generate()}_${_pickedFile!.name}'
             : 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf');
+
+    // If a file was picked from device storage, persist a local copy in OfflineDocumentService
+    // so it opens offline immediately and never triggers "File Not Found".
+    if (_pickedFile?.path != null && _pickedFile!.path!.isNotEmpty) {
+      await OfflineDocumentService.instance.importLocalFile(
+        sourceFilePath: _pickedFile!.path!,
+        urlKey: finalUrl,
+        title: title,
+      );
+    }
 
     final error = ref.read(resourcesProvider.notifier).submitResource(
           subjectId: subjectId,

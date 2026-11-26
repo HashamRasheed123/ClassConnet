@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'offline_document_service.dart';
 
 /// Represents a single captured page of an assignment
 class AssignmentPhoto {
@@ -59,9 +60,10 @@ class AssignmentPdfService {
     );
   }
 
-  /// Generates a local, 100% private PDF document containing the assignment title,
-  /// student name, roll number, and images in the exact order captured.
-  /// Automatically adapts page orientation to portrait or landscape for each image.
+  /// Generates a clean, authentic academic PDF document containing the assignment
+  /// title, student name, roll number, and scanned pages in the exact order captured.
+  /// Styled like a traditional MS Word / LaTeX university submission with classic
+  /// serif typography, black ink, and zero app watermarks or AI-style badges.
   static Future<Uint8List> generateAssignmentPdf({
     required String assignmentTitle,
     required String studentName,
@@ -69,47 +71,63 @@ class AssignmentPdfService {
     required List<AssignmentPhoto> photos,
     String? subjectName,
   }) async {
+    final cleanTitle = assignmentTitle.trim().isEmpty
+        ? 'Assignment'
+        : assignmentTitle.trim();
+    final cleanName = studentName.trim().isEmpty ? 'Student' : studentName.trim();
+    final rawRoll = rollNumber.trim();
+    final hasRoll = rawRoll.isNotEmpty &&
+        rawRoll.toUpperCase() != 'N/A' &&
+        rawRoll.toUpperCase() != 'NONE';
+    final cleanSubject = subjectName?.trim() ?? '';
+
     final pdf = pw.Document(
-      title: assignmentTitle,
-      author: studentName,
-      subject: subjectName ?? 'Academic Assignment',
-      keywords: 'assignment, student, offline, $rollNumber',
+      title: cleanTitle,
+      author: cleanName,
+      subject: cleanSubject.isNotEmpty ? cleanSubject : cleanTitle,
     );
 
-    final formattedDate =
-        DateFormat('EEEE, MMMM d, yyyy • h:mm a').format(DateTime.now());
+    // Simple, natural human date (no time-of-day or bullet symbols)
+    final formattedDate = DateFormat('d MMMM yyyy').format(DateTime.now());
     final totalPages = photos.isEmpty ? 1 : photos.length;
 
-    // Load PDF font (defaults to Helvetica / Courier built into standard PDF)
-    const baseColor = PdfColors.blueGrey900;
-    const accentColor = PdfColor.fromInt(0xFF2563EB); // AppColors.primary
-    const subtleBg = PdfColor.fromInt(0xFFF8FAFC);
-    const borderColor = PdfColor.fromInt(0xFFE2E8F0);
+    // Classic academic serif fonts (built into every PDF viewer, looks like Word/LaTeX)
+    final serifRegular = pw.Font.times();
+    final serifBold = pw.Font.timesBold();
+    final serifItalic = pw.Font.timesItalic();
+
+    const inkBlack = PdfColor.fromInt(0xFF111111);
+    const inkMuted = PdfColor.fromInt(0xFF333333);
+    const ruleColor = PdfColor.fromInt(0xFF222222);
+
+    final pageThemeBase = pw.ThemeData.withFont(
+      base: serifRegular,
+      bold: serifBold,
+      italic: serifItalic,
+    );
 
     if (photos.isEmpty) {
-      // Empty document placeholder
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
+          theme: pageThemeBase,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 36),
           build: (pw.Context context) {
-            return pw.Center(
-              child: pw.Column(
-                mainAxisAlignment: pw.MainAxisAlignment.center,
-                children: [
-                  pw.Text(
-                    assignmentTitle,
-                    style: pw.TextStyle(
-                      fontSize: 22,
-                      fontWeight: pw.FontWeight.bold,
-                      color: baseColor,
-                    ),
-                  ),
-                  pw.SizedBox(height: 10),
-                  pw.Text('Student: $studentName ($rollNumber)'),
-                  pw.SizedBox(height: 20),
-                  pw.Text('No document images attached.'),
-                ],
-              ),
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                _buildAcademicHeader(
+                  title: cleanTitle,
+                  subject: cleanSubject,
+                  studentName: cleanName,
+                  rollNumber: hasRoll ? rawRoll : null,
+                  dateText: formattedDate,
+                  inkBlack: inkBlack,
+                  inkMuted: inkMuted,
+                  ruleColor: ruleColor,
+                  isLandscape: false,
+                ),
+              ],
             );
           },
         ),
@@ -123,7 +141,7 @@ class AssignmentPdfService {
       pwImages.add(pw.MemoryImage(photo.bytes));
     }
 
-    // Build Page 1: Top Assignment Header + First Image
+    // Build Page 1: Classic University Header + First Scanned Page
     final firstPhoto = photos[0];
     final firstPwImage = pwImages[0];
     final firstIsLandscape = firstPhoto.isLandscape;
@@ -133,140 +151,48 @@ class AssignmentPdfService {
     pdf.addPage(
       pw.Page(
         pageFormat: firstPageFormat,
-        margin: const pw.EdgeInsets.all(24),
+        theme: pageThemeBase,
+        margin: const pw.EdgeInsets.fromLTRB(28, 24, 28, 20),
         build: (pw.Context context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
-              // 1. TOP ASSIGNMENT HEADER (Assignment Title, Name, Roll No)
-              pw.Container(
-                padding: const pw.EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
-                decoration: pw.BoxDecoration(
-                  color: subtleBg,
-                  borderRadius:
-                      const pw.BorderRadius.all(pw.Radius.circular(8)),
-                  border: pw.Border.all(color: borderColor, width: 1),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    // Title
-                    pw.Text(
-                      assignmentTitle.trim().isEmpty
-                          ? 'Assignment Submission'
-                          : assignmentTitle.trim(),
-                      style: pw.TextStyle(
-                        fontSize: firstIsLandscape ? 18 : 20,
-                        fontWeight: pw.FontWeight.bold,
-                        color: baseColor,
-                      ),
-                      maxLines: 2,
-                    ),
-                    if (subjectName != null && subjectName.isNotEmpty) ...[
-                      pw.SizedBox(height: 2),
-                      pw.Text(
-                        subjectName,
-                        style: const pw.TextStyle(
-                          fontSize: 10,
-                          color: accentColor,
-                        ),
-                      ),
-                    ],
-                    pw.SizedBox(height: 8),
-                    // Student details row
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.RichText(
-                          text: pw.TextSpan(
-                            children: [
-                              const pw.TextSpan(
-                                text: 'STUDENT: ',
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  color: PdfColors.grey700,
-                                ),
-                              ),
-                              pw.TextSpan(
-                                text: studentName,
-                                style: pw.TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: pw.FontWeight.bold,
-                                  color: baseColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        pw.RichText(
-                          text: pw.TextSpan(
-                            children: [
-                              const pw.TextSpan(
-                                text: 'ROLL NO: ',
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  color: PdfColors.grey700,
-                                ),
-                              ),
-                              pw.TextSpan(
-                                text: rollNumber,
-                                style: pw.TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: pw.FontWeight.bold,
-                                  color: accentColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        pw.Text(
-                          formattedDate,
-                          style: const pw.TextStyle(
-                            fontSize: 9,
-                            color: PdfColors.grey600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              _buildAcademicHeader(
+                title: cleanTitle,
+                subject: cleanSubject,
+                studentName: cleanName,
+                rollNumber: hasRoll ? rawRoll : null,
+                dateText: formattedDate,
+                inkBlack: inkBlack,
+                inkMuted: inkMuted,
+                ruleColor: ruleColor,
+                isLandscape: firstIsLandscape,
               ),
+              pw.SizedBox(height: 10),
 
-              pw.SizedBox(height: 12),
-
-              // 2. FIRST DOCUMENT IMAGE (Fitting page, respecting aspect ratio)
+              // First Scanned Document Image (no artificial rounded corners)
               pw.Expanded(
                 child: pw.Center(
-                  child: pw.ClipRRect(
-                    horizontalRadius: 4,
-                    verticalRadius: 4,
-                    child: pw.Image(
-                      firstPwImage,
-                      fit: pw.BoxFit.contain,
-                    ),
+                  child: pw.Image(
+                    firstPwImage,
+                    fit: pw.BoxFit.contain,
                   ),
                 ),
               ),
 
-              pw.SizedBox(height: 6),
-
-              // Running bottom footer
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Class Connect • Verified Submission',
+              if (totalPages > 1) ...[
+                pw.SizedBox(height: 6),
+                pw.Align(
+                  alignment: pw.Alignment.centerRight,
+                  child: pw.Text(
+                    '1 / $totalPages',
                     style: const pw.TextStyle(
-                        fontSize: 8, color: PdfColors.grey500),
+                      fontSize: 9,
+                      color: inkMuted,
+                    ),
                   ),
-                  pw.Text(
-                    'Page 1 of $totalPages',
-                    style: const pw.TextStyle(
-                        fontSize: 8, color: PdfColors.grey600),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ],
           );
         },
@@ -285,64 +211,57 @@ class AssignmentPdfService {
       pdf.addPage(
         pw.Page(
           pageFormat: pageFormat,
-          margin: const pw.EdgeInsets.all(20),
+          theme: pageThemeBase,
+          margin: const pw.EdgeInsets.fromLTRB(24, 20, 24, 20),
           build: (pw.Context context) {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.stretch,
               children: [
-                // Minimal header on consecutive pages
+                // Subtle top running line with Name & Roll No
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      assignmentTitle,
+                      cleanName,
                       style: const pw.TextStyle(
-                        fontSize: 8,
-                        color: PdfColors.grey600,
+                        fontSize: 9.5,
+                        color: inkMuted,
                       ),
                     ),
-                    pw.Text(
-                      '$studentName ($rollNumber)',
-                      style: const pw.TextStyle(
-                        fontSize: 8,
-                        color: PdfColors.grey600,
+                    if (hasRoll)
+                      pw.Text(
+                        'Roll No: $rawRoll',
+                        style: const pw.TextStyle(
+                          fontSize: 9.5,
+                          color: inkMuted,
+                        ),
                       ),
-                    ),
                   ],
                 ),
-                pw.SizedBox(height: 6),
+                pw.SizedBox(height: 3),
+                pw.Container(height: 0.4, color: PdfColors.grey500),
+                pw.SizedBox(height: 8),
 
-                // Consecutive Image
+                // Consecutive Scanned Page Image
                 pw.Expanded(
                   child: pw.Center(
-                    child: pw.ClipRRect(
-                      horizontalRadius: 4,
-                      verticalRadius: 4,
-                      child: pw.Image(
-                        pwImg,
-                        fit: pw.BoxFit.contain,
-                      ),
+                    child: pw.Image(
+                      pwImg,
+                      fit: pw.BoxFit.contain,
                     ),
                   ),
                 ),
 
                 pw.SizedBox(height: 6),
-
-                // Running bottom footer
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'Page $pageIndex of $totalPages',
-                      style: const pw.TextStyle(
-                          fontSize: 8, color: PdfColors.grey600),
+                pw.Align(
+                  alignment: pw.Alignment.centerRight,
+                  child: pw.Text(
+                    '$pageIndex / $totalPages',
+                    style: const pw.TextStyle(
+                      fontSize: 9,
+                      color: inkMuted,
                     ),
-                    pw.Text(
-                      '100% Offline Generation',
-                      style: const pw.TextStyle(
-                          fontSize: 8, color: PdfColors.grey500),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             );
@@ -352,6 +271,134 @@ class AssignmentPdfService {
     }
 
     return pdf.save();
+  }
+
+  /// Traditional university assignment header block (MS Word / LaTeX style).
+  static pw.Widget _buildAcademicHeader({
+    required String title,
+    required String subject,
+    required String studentName,
+    required String? rollNumber,
+    required String dateText,
+    required PdfColor inkBlack,
+    required PdfColor inkMuted,
+    required PdfColor ruleColor,
+    required bool isLandscape,
+  }) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        if (subject.isNotEmpty) ...[
+          pw.Text(
+            subject,
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(
+              fontSize: 11,
+              fontStyle: pw.FontStyle.italic,
+              color: inkMuted,
+            ),
+          ),
+          pw.SizedBox(height: 3),
+        ],
+        pw.Text(
+          title,
+          textAlign: pw.TextAlign.center,
+          style: pw.TextStyle(
+            fontSize: isLandscape ? 15 : 16.5,
+            fontWeight: pw.FontWeight.bold,
+            color: inkBlack,
+          ),
+          maxLines: 2,
+        ),
+        pw.SizedBox(height: 8),
+        pw.Container(height: 0.8, color: ruleColor),
+        pw.SizedBox(height: 6),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.RichText(
+                  text: pw.TextSpan(
+                    children: [
+                      pw.TextSpan(
+                        text: 'Name: ',
+                        style: pw.TextStyle(
+                          fontSize: 11,
+                          fontWeight: pw.FontWeight.bold,
+                          color: inkBlack,
+                        ),
+                      ),
+                      pw.TextSpan(
+                        text: studentName,
+                        style: pw.TextStyle(
+                          fontSize: 11,
+                          color: inkBlack,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (rollNumber != null) ...[
+                  pw.SizedBox(height: 3),
+                  pw.RichText(
+                    text: pw.TextSpan(
+                      children: [
+                        pw.TextSpan(
+                          text: 'Roll No: ',
+                          style: pw.TextStyle(
+                            fontSize: 11,
+                            fontWeight: pw.FontWeight.bold,
+                            color: inkBlack,
+                          ),
+                        ),
+                        pw.TextSpan(
+                          text: rollNumber,
+                          style: pw.TextStyle(
+                            fontSize: 11,
+                            color: inkBlack,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.RichText(
+                  text: pw.TextSpan(
+                    children: [
+                      pw.TextSpan(
+                        text: 'Date: ',
+                        style: pw.TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: pw.FontWeight.bold,
+                          color: inkBlack,
+                        ),
+                      ),
+                      pw.TextSpan(
+                        text: dateText,
+                        style: pw.TextStyle(
+                          fontSize: 10.5,
+                          color: inkBlack,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 6),
+        pw.Container(height: 0.5, color: ruleColor),
+      ],
+    );
   }
 
   /// Downloads/saves the generated PDF file locally to the device storage
@@ -365,7 +412,12 @@ class AssignmentPdfService {
 
     Directory? dir;
     if (!kIsWeb && Platform.isAndroid) {
-      // Try external storage directory or downloads on Android
+      // Request storage permission on legacy Android and save to public Download/ClassConnect
+      await OfflineDocumentService.instance.saveToPublicDownloads(
+        fileName: '$sanitizedName.pdf',
+        mimeType: 'application/pdf',
+        bytes: pdfBytes,
+      );
       try {
         dir = await getExternalStorageDirectory();
       } catch (_) {}

@@ -5,6 +5,7 @@ import '../../providers/class_providers.dart';
 import '../assignments/assignment_tracker_screen.dart';
 import '../home/home_screen.dart';
 import '../profile/profile_screen.dart';
+import '../quizzes/quiz_center_screen.dart';
 import '../timetable/timetable_screen.dart';
 import '../vault/vault_screen.dart';
 
@@ -18,13 +19,15 @@ class MainShell extends ConsumerStatefulWidget {
   ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends ConsumerState<MainShell> {
+class _MainShellState extends ConsumerState<MainShell>
+    with WidgetsBindingObserver {
   int _currentIndex = 0;
 
   static const List<Widget> _screens = [
     HomeScreen(),
     TimetableScreen(),
     AssignmentTrackerScreen(),
+    QuizCenterScreen(),
     VaultScreen(),
     ProfileScreen(),
   ];
@@ -32,6 +35,10 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    AlertScheduler.instance.activeAlarmNotifier
+        .addListener(_onActiveAlarmChanged);
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // 1. Check for app updates
       final autoCheck = await UpdateService.instance.isAutoCheckEnabled();
@@ -43,19 +50,10 @@ class _MainShellState extends ConsumerState<MainShell> {
             );
       }
 
-      // 2. Initial timetable exact alarm synchronization
+      // 2. Request alarm permissions & synchronize all lecture/assignment alarms
       try {
-        final slots = ref.read(timetableSlotsProvider);
-        final subjects = ref.read(subjectsProvider);
-        final mode = ref.read(alertModeProvider);
-        final leadTime = ref.read(alertLeadTimeProvider);
-        final subjectMap = {for (var s in subjects) s.id: s};
-        await AlertScheduler.instance.syncAllTimetableAlerts(
-          slots: slots,
-          subjectMap: subjectMap,
-          mode: mode,
-          leadTimeMinutes: leadTime,
-        );
+        await AlertScheduler.instance.ensureAlarmPermissions();
+        if (mounted) _syncAllAlarms();
       } catch (e) {
         debugPrint('Initial alarm sync: $e');
       }
@@ -63,33 +61,66 @@ class _MainShellState extends ConsumerState<MainShell> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    // Re-sync alarms whenever timetable slots or alert mode updates
-    ref.listen(timetableSlotsProvider, (previous, next) {
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    AlertScheduler.instance.activeAlarmNotifier
+        .removeListener(_onActiveAlarmChanged);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      // Pull latest cloud overrides/timetable/assignments on resume and resync alarms
+      ref.read(syncStateProvider.notifier).triggerSync();
+    }
+  }
+
+  void _onActiveAlarmChanged() {
+    final alarm = AlertScheduler.instance.activeAlarmNotifier.value;
+    if (alarm != null && mounted) {
+      if (_currentIndex != 0) {
+        setState(() => _currentIndex = 0);
+      }
+      // If a sub-route (e.g. Admin Console) is open, bring the user to Home Screen
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+
+  void _syncAllAlarms() {
+    try {
+      final slots = ref.read(timetableSlotsProvider);
       final subjects = ref.read(subjectsProvider);
       final mode = ref.read(alertModeProvider);
       final leadTime = ref.read(alertLeadTimeProvider);
-      final subjectMap = {for (var s in subjects) s.id: s};
-      AlertScheduler.instance.syncAllTimetableAlerts(
-        slots: next,
-        subjectMap: subjectMap,
-        mode: mode,
-        leadTimeMinutes: leadTime,
-      );
-    });
-
-    ref.listen(alertModeProvider, (previous, next) {
-      final slots = ref.read(timetableSlotsProvider);
-      final subjects = ref.read(subjectsProvider);
-      final leadTime = ref.read(alertLeadTimeProvider);
+      final overrides = ref.read(dailyOverridesProvider);
+      final assignments = ref.read(assignmentsProvider);
+      final completed = ref.read(assignmentCompletionProvider);
       final subjectMap = {for (var s in subjects) s.id: s};
       AlertScheduler.instance.syncAllTimetableAlerts(
         slots: slots,
         subjectMap: subjectMap,
-        mode: next,
+        mode: mode,
         leadTimeMinutes: leadTime,
+        overrides: overrides,
+        assignments: assignments,
+        completedAssignmentIds: completed,
       );
-    });
+    } catch (e) {
+      debugPrint('Error syncing all alarms: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Re-sync alarms whenever timetable slots, subjects, overrides, assignments, lead time, or alert mode updates
+    ref.listen(timetableSlotsProvider, (_, _) => _syncAllAlarms());
+    ref.listen(subjectsProvider, (_, _) => _syncAllAlarms());
+    ref.listen(alertModeProvider, (_, _) => _syncAllAlarms());
+    ref.listen(alertLeadTimeProvider, (_, _) => _syncAllAlarms());
+    ref.listen(dailyOverridesProvider, (_, _) => _syncAllAlarms());
+    ref.listen(assignmentsProvider, (_, _) => _syncAllAlarms());
+    ref.listen(assignmentCompletionProvider, (_, _) => _syncAllAlarms());
     final pendingCount = ref.watch(pendingModQueueCountProvider);
     final user = ref.watch(currentUserProvider);
     final completedIds = ref.watch(assignmentCompletionProvider);
@@ -138,16 +169,23 @@ class _MainShellState extends ConsumerState<MainShell> {
                 icon: Icons.assignment_outlined,
                 activeIcon: Icons.assignment_rounded,
                 label: 'Tasks',
-                badgeCount: urgentAssignmentsCount > 0 ? urgentAssignmentsCount : null,
+                badgeCount:
+                    urgentAssignmentsCount > 0 ? urgentAssignmentsCount : null,
               ),
               _buildNavItem(
                 index: 3,
+                icon: Icons.psychology_alt_outlined,
+                activeIcon: Icons.psychology_alt_rounded,
+                label: 'Quizzes',
+              ),
+              _buildNavItem(
+                index: 4,
                 icon: Icons.folder_copy_outlined,
                 activeIcon: Icons.folder_copy_rounded,
                 label: 'Vault',
               ),
               _buildNavItem(
-                index: 4,
+                index: 5,
                 icon: Icons.person_outline_rounded,
                 activeIcon: Icons.person_rounded,
                 label: 'Profile',
@@ -176,7 +214,7 @@ class _MainShellState extends ConsumerState<MainShell> {
       borderRadius: BorderRadius.circular(16),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected ? AppColors.primarySoft : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
@@ -190,7 +228,8 @@ class _MainShellState extends ConsumerState<MainShell> {
                 Icon(
                   isSelected ? activeIcon : icon,
                   size: 20,
-                  color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                  color:
+                      isSelected ? AppColors.primary : AppColors.textSecondary,
                 ),
                 if (badgeCount != null)
                   Positioned(

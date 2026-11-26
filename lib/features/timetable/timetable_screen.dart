@@ -482,6 +482,53 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                     ),
                                   ),
                                 ],
+                                if (slotOverride?.status !=
+                                        OverrideStatus.cancelled &&
+                                    ((slotOverride?.hasMeetingUrl ?? false) ||
+                                        slot.hasMeetingUrl)) ...[
+                                  const SizedBox(height: 8),
+                                  InkWell(
+                                    onTap: () => Formatters.launchMeetingUrl(
+                                      context,
+                                      slotOverride?.effectiveMeetingUrl ??
+                                          slot.effectiveMeetingUrl,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primarySoft,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: AppColors.primary
+                                              .withValues(alpha: 0.25),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.video_call_rounded,
+                                              size: 15,
+                                              color: AppColors.primary),
+                                          SizedBox(width: 5),
+                                          Text(
+                                            'Join Class Meeting',
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: AppColors.primary,
+                                            ),
+                                          ),
+                                          SizedBox(width: 4),
+                                          Icon(Icons.open_in_new_rounded,
+                                              size: 12,
+                                              color: AppColors.primary),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -580,6 +627,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
     String endTime = existingSlot?.endTime ?? '10:15';
     final roomController =
         TextEditingController(text: existingSlot?.defaultRoom ?? 'Hall A-102');
+    final meetingUrlController =
+        TextEditingController(text: existingSlot?.meetingUrl ?? '');
 
     showModalBottomSheet(
       context: context,
@@ -869,8 +918,35 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                     TextField(
                       controller: roomController,
                       decoration: InputDecoration(
-                        hintText: 'e.g. Hall A-102, Lab 3',
+                        hintText: 'e.g. Hall A-102, Lab 3, Online',
                         prefixIcon: const Icon(Icons.room_outlined, size: 18),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    const Text(
+                      'Meeting / Online Class URL (Optional)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: meetingUrlController,
+                      keyboardType: TextInputType.url,
+                      decoration: InputDecoration(
+                        hintText:
+                            'e.g. https://meet.google.com/... or Zoom link',
+                        prefixIcon:
+                            const Icon(Icons.video_call_rounded, size: 20),
                         filled: true,
                         fillColor: const Color(0xFFF8FAFC),
                         border: OutlineInputBorder(
@@ -885,8 +961,10 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton(
-                        onPressed: () {
+                        onPressed: () async {
                           final roomText = roomController.text.trim();
+                          final meetingUrlText =
+                              meetingUrlController.text.trim();
                           if (roomText.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -895,40 +973,55 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                             return;
                           }
 
+                          String? error;
                           if (isEditing) {
                             final updated = existingSlot.copyWith(
                               subjectId: selectedSubjectId,
                               dayOfWeek: dayOfWeek,
-                              startTime: startTime,
-                              endTime: endTime,
+                              startTime: Formatters.normalizeTime(startTime),
+                              endTime: Formatters.normalizeTime(endTime),
                               defaultRoom: roomText,
+                              meetingUrl: meetingUrlText.isNotEmpty
+                                  ? meetingUrlText
+                                  : null,
+                              clearMeetingUrl: meetingUrlText.isEmpty,
                             );
-                            ref
+                            error = await ref
                                 .read(timetableSlotsProvider.notifier)
                                 .updateSlot(updated);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Timetable slot updated!')),
-                            );
                           } else {
                             final newSlot = TimetableSlotModel(
                               id: UuidUtil.generate(),
                               subjectId: selectedSubjectId,
                               dayOfWeek: dayOfWeek,
-                              startTime: startTime,
-                              endTime: endTime,
+                              startTime: Formatters.normalizeTime(startTime),
+                              endTime: Formatters.normalizeTime(endTime),
                               defaultRoom: roomText,
+                              meetingUrl: meetingUrlText.isNotEmpty
+                                  ? meetingUrlText
+                                  : null,
                             );
-                            ref
+                            error = await ref
                                 .read(timetableSlotsProvider.notifier)
                                 .addSlot(newSlot);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('New slot added to timetable!')),
-                            );
                           }
 
-                          Navigator.pop(ctx);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (!context.mounted) return;
+
+                          final baseMsg = isEditing
+                              ? 'Timetable slot updated (${Formatters.formatTimeRangeString(startTime, endTime)})!'
+                              : 'New slot added to timetable!';
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                error == null ? baseMsg : '$baseMsg (Cloud: $error)',
+                              ),
+                              backgroundColor:
+                                  error == null ? AppColors.success : AppColors.warning,
+                            ),
+                          );
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
@@ -1019,11 +1112,20 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
     SubjectModel subject,
   ) {
     final roomController = TextEditingController(text: slot.defaultRoom);
+    final meetingUrlController =
+        TextEditingController(text: slot.meetingUrl ?? '');
     final topicController = TextEditingController();
     OverrideStatus status = OverrideStatus.rescheduled;
-    String startTime = slot.startTime;
-    String endTime = slot.endTime;
-    DateTime selectedDate = DateTime.now();
+    String startTime = Formatters.normalizeTime(slot.startTime);
+    String endTime = Formatters.normalizeTime(slot.endTime);
+
+    final now = DateTime.now();
+    int dayDiff = slot.dayOfWeek - now.weekday;
+    if (dayDiff < 0) dayDiff += 7;
+    final DateTime originDate =
+        DateTime(now.year, now.month, now.day).add(Duration(days: dayDiff));
+    DateTime selectedDate = originDate;
+    bool alsoUpdatePermanentSlot = false;
 
     showModalBottomSheet(
       context: context,
@@ -1231,7 +1333,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           Expanded(
                             child: InkWell(
                               onTap: () async {
-                                final parts = startTime.split(':').map(int.parse).toList();
+                                final norm = Formatters.normalizeTime(startTime);
+                                final parts = norm.split(':').map(int.parse).toList();
                                 final picked = await showTimePicker(
                                   context: context,
                                   initialTime: TimeOfDay(hour: parts[0], minute: parts[1]),
@@ -1270,7 +1373,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           Expanded(
                             child: InkWell(
                               onTap: () async {
-                                final parts = endTime.split(':').map(int.parse).toList();
+                                final norm = Formatters.normalizeTime(endTime);
+                                final parts = norm.split(':').map(int.parse).toList();
                                 final picked = await showTimePicker(
                                   context: context,
                                   initialTime: TimeOfDay(hour: parts[0], minute: parts[1]),
@@ -1307,7 +1411,24 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
+                      CheckboxListTile(
+                        value: alsoUpdatePermanentSlot,
+                        onChanged: (val) => setModalState(
+                            () => alsoUpdatePermanentSlot = val ?? false),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        dense: true,
+                        title: const Text(
+                          'Also update permanent weekly timetable slot',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
 
                       // Room / Venue
                       const Text(
@@ -1323,6 +1444,33 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                         decoration: InputDecoration(
                           hintText: 'e.g. CS Lab 5 (2nd Floor)',
                           prefixIcon: const Icon(Icons.room_rounded, size: 18),
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.border),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Meeting / Online Class URL (Optional)
+                      const Text(
+                        'Meeting / Online Class URL (Optional)',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: meetingUrlController,
+                        keyboardType: TextInputType.url,
+                        decoration: InputDecoration(
+                          hintText:
+                              'e.g. https://meet.google.com/... or Zoom link',
+                          prefixIcon:
+                              const Icon(Icons.video_call_rounded, size: 20),
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),
                           border: OutlineInputBorder(
@@ -1362,38 +1510,85 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton(
-                        onPressed: () {
-                          ref
+                        onPressed: () async {
+                          final normStart = Formatters.normalizeTime(startTime);
+                          final normEnd = Formatters.normalizeTime(endTime);
+                          final roomText = roomController.text.trim();
+                          final meetingUrlText =
+                              meetingUrlController.text.trim();
+
+                          if (status == OverrideStatus.rescheduled &&
+                              alsoUpdatePermanentSlot) {
+                            await ref
+                                .read(timetableSlotsProvider.notifier)
+                                .updateSlot(
+                                  slot.copyWith(
+                                    dayOfWeek: selectedDate.weekday,
+                                    startTime: normStart,
+                                    endTime: normEnd,
+                                    defaultRoom: roomText.isNotEmpty
+                                        ? roomText
+                                        : slot.defaultRoom,
+                                    meetingUrl: meetingUrlText.isNotEmpty
+                                        ? meetingUrlText
+                                        : null,
+                                    clearMeetingUrl: meetingUrlText.isEmpty,
+                                  ),
+                                );
+                          }
+
+                          final error = await ref
                               .read(dailyOverridesProvider.notifier)
                               .setDirectOverride(
                                 slotId: slot.id,
                                 status: status,
-                                date: selectedDate,
+                                date: status == OverrideStatus.cancelled
+                                    ? selectedDate
+                                    : originDate,
                                 actualRoom: status == OverrideStatus.rescheduled
-                                    ? roomController.text.trim()
+                                    ? roomText
                                     : null,
                                 actualStartTime: status == OverrideStatus.rescheduled
-                                    ? startTime
+                                    ? normStart
                                     : null,
                                 actualEndTime: status == OverrideStatus.rescheduled
-                                    ? endTime
+                                    ? normEnd
                                     : null,
                                 rescheduledDate: status == OverrideStatus.rescheduled
                                     ? selectedDate
+                                    : null,
+                                meetingUrl: status == OverrideStatus.rescheduled &&
+                                        meetingUrlText.isNotEmpty
+                                    ? meetingUrlText
                                     : null,
                                 topicCovered: topicController.text.trim().isNotEmpty
                                     ? topicController.text.trim()
                                     : null,
                               );
 
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(status == OverrideStatus.cancelled
-                                  ? 'Cancelled lecture broadcasted to class!'
-                                  : 'Lecture rescheduled (${Formatters.formatTimeRangeString(startTime, endTime)}) & broadcasted!'),
-                            ),
-                          );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (!context.mounted) return;
+
+                          final successMsg = status == OverrideStatus.cancelled
+                              ? 'Cancelled lecture broadcasted to class!'
+                              : 'Lecture rescheduled (${Formatters.formatTimeRangeString(startTime, endTime)}) & broadcasted!';
+
+                          if (error == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(successMsg),
+                                backgroundColor: AppColors.success,
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('$successMsg (Cloud: $error)'),
+                                backgroundColor: AppColors.warning,
+                                duration: const Duration(seconds: 4),
+                              ),
+                            );
+                          }
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: status == OverrideStatus.cancelled

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../core/config/app_config.dart';
 import '../core/utils/formatters.dart';
@@ -295,6 +296,7 @@ class TimetableSlotModel {
   final String startTime; // "09:00"
   final String endTime; // "10:15"
   final String defaultRoom;
+  final String? meetingUrl;
 
   const TimetableSlotModel({
     required this.id,
@@ -303,16 +305,49 @@ class TimetableSlotModel {
     required this.startTime,
     required this.endTime,
     required this.defaultRoom,
+    this.meetingUrl,
   });
 
+  static final RegExp _urlMetaRegex = RegExp(r'\s*\[CC_URL:([^\]]+)\]\s*$');
+
+  /// Encodes [meetingUrl] into [defaultRoom] so unmigrated Supabase `timetable_slots`
+  /// tables persist and sync the class meeting link without needing a schema change.
+  static String encodeRoomWithUrl(String room, String? meetingUrl) {
+    final cleanRoom = room.replaceFirst(_urlMetaRegex, '').trim();
+    final safeRoom = cleanRoom.isEmpty ? 'TBD' : cleanRoom;
+    final cleanUrl = meetingUrl?.trim();
+    if (cleanUrl == null || cleanUrl.isEmpty) {
+      return safeRoom;
+    }
+    return '$safeRoom [CC_URL:${Uri.encodeComponent(cleanUrl)}]';
+  }
+
+  String? get effectiveMeetingUrl {
+    if (meetingUrl != null && meetingUrl!.trim().isNotEmpty) {
+      return Formatters.normalizeMeetingUrl(meetingUrl);
+    }
+    return Formatters.extractMeetingUrl(defaultRoom);
+  }
+
+  bool get hasMeetingUrl =>
+      effectiveMeetingUrl != null && effectiveMeetingUrl!.isNotEmpty;
+
   TimeOfDay get startParsed {
-    final parts = startTime.split(':').map(int.parse).toList();
-    return TimeOfDay(hour: parts[0], minute: parts[1]);
+    final norm = Formatters.normalizeTime(startTime);
+    final parts = (norm.isNotEmpty ? norm : '09:00').split(':');
+    return TimeOfDay(
+      hour: int.tryParse(parts[0]) ?? 9,
+      minute: parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0,
+    );
   }
 
   TimeOfDay get endParsed {
-    final parts = endTime.split(':').map(int.parse).toList();
-    return TimeOfDay(hour: parts[0], minute: parts[1]);
+    final norm = Formatters.normalizeTime(endTime);
+    final parts = (norm.isNotEmpty ? norm : '10:00').split(':');
+    return TimeOfDay(
+      hour: int.tryParse(parts[0]) ?? 10,
+      minute: parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0,
+    );
   }
 
   String get formattedStartTime => Formatters.formatTimeString(startTime);
@@ -326,25 +361,48 @@ class TimetableSlotModel {
     String? startTime,
     String? endTime,
     String? defaultRoom,
+    String? meetingUrl,
+    bool clearMeetingUrl = false,
   }) {
     return TimetableSlotModel(
       id: id ?? this.id,
       subjectId: subjectId ?? this.subjectId,
       dayOfWeek: dayOfWeek ?? this.dayOfWeek,
-      startTime: startTime ?? this.startTime,
-      endTime: endTime ?? this.endTime,
+      startTime: startTime != null ? Formatters.normalizeTime(startTime) : this.startTime,
+      endTime: endTime != null ? Formatters.normalizeTime(endTime) : this.endTime,
       defaultRoom: defaultRoom ?? this.defaultRoom,
+      meetingUrl: clearMeetingUrl ? null : (meetingUrl ?? this.meetingUrl),
     );
   }
 
   factory TimetableSlotModel.fromMap(Map<String, dynamic> map) {
+    String rawRoom = map['default_room'] as String? ?? 'TBD';
+    String? metaUrl;
+    final match = _urlMetaRegex.firstMatch(rawRoom);
+    if (match != null) {
+      final encoded = match.group(1);
+      if (encoded != null && encoded.isNotEmpty) {
+        try {
+          metaUrl = Uri.decodeComponent(encoded);
+        } catch (_) {
+          metaUrl = encoded;
+        }
+      }
+      rawRoom = rawRoom.substring(0, match.start).trim();
+      if (rawRoom.isEmpty) rawRoom = 'TBD';
+    }
+    final explicitUrl = (map['meeting_url'] as String?)?.trim();
+    final resolvedUrl =
+        (explicitUrl != null && explicitUrl.isNotEmpty) ? explicitUrl : metaUrl;
+
     return TimetableSlotModel(
       id: map['id'] as String,
       subjectId: map['subject_id'] as String,
       dayOfWeek: (map['day_of_week'] as num).toInt(),
-      startTime: map['start_time'] as String,
-      endTime: map['end_time'] as String,
-      defaultRoom: map['default_room'] as String,
+      startTime: Formatters.normalizeTime(map['start_time'] as String?),
+      endTime: Formatters.normalizeTime(map['end_time'] as String?),
+      defaultRoom: rawRoom,
+      meetingUrl: resolvedUrl,
     );
   }
 
@@ -352,9 +410,9 @@ class TimetableSlotModel {
         'id': id,
         'subject_id': subjectId,
         'day_of_week': dayOfWeek,
-        'start_time': startTime,
-        'end_time': endTime,
-        'default_room': defaultRoom,
+        'start_time': Formatters.normalizeTime(startTime),
+        'end_time': Formatters.normalizeTime(endTime),
+        'default_room': encodeRoomWithUrl(defaultRoom, meetingUrl),
       };
 }
 
@@ -385,6 +443,7 @@ class DailyOverrideModel {
   final String? actualStartTime;
   final String? actualEndTime;
   final DateTime? rescheduledDate;
+  final String? meetingUrl;
   final String? topicCovered;
   final String? reportedBy;
   final bool isApproved;
@@ -398,10 +457,21 @@ class DailyOverrideModel {
     this.actualStartTime,
     this.actualEndTime,
     this.rescheduledDate,
+    this.meetingUrl,
     this.topicCovered,
     this.reportedBy,
     this.isApproved = false,
   });
+
+  String? get effectiveMeetingUrl {
+    if (meetingUrl != null && meetingUrl!.trim().isNotEmpty) {
+      return Formatters.normalizeMeetingUrl(meetingUrl);
+    }
+    return Formatters.extractMeetingUrl(actualRoom);
+  }
+
+  bool get hasMeetingUrl =>
+      effectiveMeetingUrl != null && effectiveMeetingUrl!.isNotEmpty;
 
   String? get formattedStartTime =>
       actualStartTime != null ? Formatters.formatTimeString(actualStartTime!) : null;
@@ -419,6 +489,8 @@ class DailyOverrideModel {
     String? actualStartTime,
     String? actualEndTime,
     DateTime? rescheduledDate,
+    String? meetingUrl,
+    bool clearMeetingUrl = false,
     String? topicCovered,
     String? reportedBy,
     bool? isApproved,
@@ -432,25 +504,108 @@ class DailyOverrideModel {
       actualStartTime: actualStartTime ?? this.actualStartTime,
       actualEndTime: actualEndTime ?? this.actualEndTime,
       rescheduledDate: rescheduledDate ?? this.rescheduledDate,
+      meetingUrl: clearMeetingUrl ? null : (meetingUrl ?? this.meetingUrl),
       topicCovered: topicCovered ?? this.topicCovered,
       reportedBy: reportedBy ?? this.reportedBy,
       isApproved: isApproved ?? this.isApproved,
     );
   }
 
+  static final RegExp _metaPrefixRegex = RegExp(r'^\[CC_META:([^\]]*)\]\s*');
+
+  /// Encodes `actual_start_time`, `actual_end_time`, `rescheduled_date`, and `meeting_url`
+  /// into `topic_covered` so unmigrated Supabase instances without those columns
+  /// still persist and sync meeting time/date/link updates reliably.
+  static String? encodeMetaIntoTopic({
+    String? topicCovered,
+    String? actualStartTime,
+    String? actualEndTime,
+    String? rescheduledDate,
+    String? meetingUrl,
+  }) {
+    final cleanTopic =
+        (topicCovered ?? '').replaceFirst(_metaPrefixRegex, '').trim();
+    final normStart = Formatters.normalizeOptionalTime(actualStartTime);
+    final normEnd = Formatters.normalizeOptionalTime(actualEndTime);
+    final normDate = (rescheduledDate != null && rescheduledDate.trim().isNotEmpty)
+        ? rescheduledDate.trim().substring(0, 10)
+        : null;
+    final cleanUrl =
+        (meetingUrl != null && meetingUrl.trim().isNotEmpty) ? meetingUrl.trim() : null;
+
+    if (normStart == null &&
+        normEnd == null &&
+        normDate == null &&
+        cleanUrl == null) {
+      return cleanTopic.isEmpty ? null : cleanTopic;
+    }
+
+    final parts = <String>[
+      if (normStart != null) 'start=$normStart',
+      if (normEnd != null) 'end=$normEnd',
+      if (normDate != null) 'rdate=$normDate',
+      if (cleanUrl != null) 'url=${Uri.encodeComponent(cleanUrl)}',
+    ];
+    final prefix = '[CC_META:${parts.join(';')}]';
+    return cleanTopic.isEmpty ? prefix : '$prefix $cleanTopic';
+  }
+
   factory DailyOverrideModel.fromMap(Map<String, dynamic> map) {
+    String? rawTopic = map['topic_covered'] as String?;
+    String? metaStart;
+    String? metaEnd;
+    String? metaRDate;
+    String? metaUrl;
+
+    if (rawTopic != null) {
+      final match = _metaPrefixRegex.firstMatch(rawTopic);
+      if (match != null) {
+        final metaBody = match.group(1) ?? '';
+        for (final kv in metaBody.split(';')) {
+          final idx = kv.indexOf('=');
+          if (idx > 0) {
+            final k = kv.substring(0, idx).trim();
+            final v = kv.substring(idx + 1).trim();
+            if (v.isNotEmpty) {
+              if (k == 'start') metaStart = v;
+              if (k == 'end') metaEnd = v;
+              if (k == 'rdate') metaRDate = v;
+              if (k == 'url') {
+                try {
+                  metaUrl = Uri.decodeComponent(v);
+                } catch (_) {
+                  metaUrl = v;
+                }
+              }
+            }
+          }
+        }
+        final stripped = rawTopic.substring(match.end).trim();
+        rawTopic = stripped.isEmpty ? null : stripped;
+      }
+    }
+
+    final rawStart = (map['actual_start_time'] as String?) ?? metaStart;
+    final rawEnd = (map['actual_end_time'] as String?) ?? metaEnd;
+    final rawRescheduledDate =
+        (map['rescheduled_date'] as String?) ?? metaRDate;
+    final explicitUrl = (map['meeting_url'] as String?)?.trim();
+    final resolvedUrl =
+        (explicitUrl != null && explicitUrl.isNotEmpty) ? explicitUrl : metaUrl;
+
     return DailyOverrideModel(
       id: map['id'] as String,
       slotId: map['slot_id'] as String,
       date: DateTime.parse(map['date'] as String),
       status: OverrideStatus.fromString(map['status'] as String? ?? 'scheduled'),
       actualRoom: map['actual_room'] as String?,
-      actualStartTime: map['actual_start_time'] as String?,
-      actualEndTime: map['actual_end_time'] as String?,
-      rescheduledDate: map['rescheduled_date'] != null
-          ? DateTime.tryParse(map['rescheduled_date'] as String)
+      actualStartTime: Formatters.normalizeOptionalTime(rawStart),
+      actualEndTime: Formatters.normalizeOptionalTime(rawEnd),
+      rescheduledDate: rawRescheduledDate != null
+          ? DateTime.tryParse(rawRescheduledDate)
           : null,
-      topicCovered: map['topic_covered'] as String?,
+      meetingUrl: resolvedUrl,
+      topicCovered: rawTopic,
       reportedBy: map['reported_by'] as String?,
       isApproved: map['is_approved'] as bool? ?? false,
     );
@@ -462,9 +617,11 @@ class DailyOverrideModel {
         'date': date.toIso8601String().substring(0, 10),
         'status': status.name,
         'actual_room': actualRoom,
-        'actual_start_time': actualStartTime,
-        'actual_end_time': actualEndTime,
+        'actual_start_time': Formatters.normalizeOptionalTime(actualStartTime),
+        'actual_end_time': Formatters.normalizeOptionalTime(actualEndTime),
         'rescheduled_date': rescheduledDate?.toIso8601String().substring(0, 10),
+        'meeting_url':
+            meetingUrl?.trim().isNotEmpty == true ? meetingUrl!.trim() : null,
         'topic_covered': topicCovered,
         'reported_by': reportedBy,
         'is_approved': isApproved,
@@ -607,30 +764,53 @@ class LectureItem {
       override?.status == OverrideStatus.rescheduled &&
       override?.actualStartTime != null &&
       override!.actualStartTime!.isNotEmpty &&
-      override!.actualStartTime != slot.startTime;
+      (Formatters.normalizeTime(override!.actualStartTime) !=
+              Formatters.normalizeTime(slot.startTime) ||
+          (override?.actualEndTime != null &&
+              override!.actualEndTime!.isNotEmpty &&
+              Formatters.normalizeTime(override!.actualEndTime) !=
+                  Formatters.normalizeTime(slot.endTime)));
 
   bool get isDayRescheduled =>
       override?.status == OverrideStatus.rescheduled &&
       override?.rescheduledDate != null;
 
-  bool get isRescheduled => isRoomChanged || isTimeChanged || isDayRescheduled;
+  bool get isRescheduled =>
+      override?.status == OverrideStatus.rescheduled &&
+      (isRoomChanged || isTimeChanged || isDayRescheduled);
 
   String get effectiveRoom =>
       isRoomChanged ? override!.actualRoom! : slot.defaultRoom;
 
   String get effectiveStartTime =>
-      isTimeChanged ? override!.actualStartTime! : slot.startTime;
+      (override?.status == OverrideStatus.rescheduled &&
+              override?.actualStartTime != null &&
+              override!.actualStartTime!.isNotEmpty)
+          ? Formatters.normalizeTime(override!.actualStartTime)
+          : Formatters.normalizeTime(slot.startTime);
 
   String get effectiveEndTime =>
-      (isTimeChanged && override?.actualEndTime != null)
-          ? override!.actualEndTime!
-          : slot.endTime;
+      (override?.status == OverrideStatus.rescheduled &&
+              override?.actualEndTime != null &&
+              override!.actualEndTime!.isNotEmpty)
+          ? Formatters.normalizeTime(override!.actualEndTime)
+          : Formatters.normalizeTime(slot.endTime);
 
   String get formattedStartTime => Formatters.formatTimeString(effectiveStartTime);
   String get formattedEndTime => Formatters.formatTimeString(effectiveEndTime);
   String get formattedTimeRange => '$formattedStartTime - $formattedEndTime';
 
   String? get topicCovered => override?.topicCovered;
+
+  String? get meetingUrl {
+    if (isCancelled) return null;
+    if (override != null && override!.hasMeetingUrl) {
+      return override!.effectiveMeetingUrl;
+    }
+    return slot.effectiveMeetingUrl;
+  }
+
+  bool get hasMeetingUrl => meetingUrl != null && meetingUrl!.isNotEmpty;
 
   bool get isDayMovedAway {
     if (override?.status != OverrideStatus.rescheduled || override?.rescheduledDate == null) {
@@ -674,6 +854,20 @@ class AttendanceRecord {
       subjectId: subjectId ?? this.subjectId,
       attended: attended ?? this.attended,
       total: total ?? this.total,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'subject_id': subjectId,
+        'attended': attended,
+        'total': total,
+      };
+
+  factory AttendanceRecord.fromMap(Map<String, dynamic> map) {
+    return AttendanceRecord(
+      subjectId: map['subject_id'] as String? ?? '',
+      attended: (map['attended'] as num?)?.toInt() ?? 0,
+      total: (map['total'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -795,4 +989,182 @@ class AssignmentModel {
     );
   }
 }
+
+/// Individual MCQ Question inside a Quiz
+class QuizQuestionModel {
+  final String id;
+  final String question;
+  final List<String> options;
+  final int correctOptionIndex;
+  final String? explanation;
+  final String? hint;
+
+  const QuizQuestionModel({
+    required this.id,
+    required this.question,
+    required this.options,
+    required this.correctOptionIndex,
+    this.explanation,
+    this.hint,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'question': question,
+        'options': options,
+        'correct_option_index': correctOptionIndex,
+        'explanation': explanation,
+        'hint': hint,
+      };
+
+  factory QuizQuestionModel.fromMap(Map<String, dynamic> map) {
+    final rawOptions = (map['options'] as List<dynamic>? ?? [])
+        .map((e) => e.toString())
+        .toList();
+    final safeOptions = rawOptions.isNotEmpty
+        ? rawOptions
+        : <String>['Option A', 'Option B', 'Option C', 'Option D'];
+    final rawIdx = (map['correct_option_index'] as num?)?.toInt() ?? 0;
+    return QuizQuestionModel(
+      id: map['id']?.toString() ??
+          'q_${DateTime.now().microsecondsSinceEpoch}',
+      question: map['question']?.toString() ?? '',
+      options: safeOptions,
+      correctOptionIndex: rawIdx.clamp(0, safeOptions.length - 1),
+      explanation: map['explanation'] as String?,
+      hint: map['hint'] as String?,
+    );
+  }
+
+  QuizQuestionModel copyWith({
+    String? id,
+    String? question,
+    List<String>? options,
+    int? correctOptionIndex,
+    String? explanation,
+    String? hint,
+  }) {
+    return QuizQuestionModel(
+      id: id ?? this.id,
+      question: question ?? this.question,
+      options: options ?? this.options,
+      correctOptionIndex: correctOptionIndex ?? this.correctOptionIndex,
+      explanation: explanation ?? this.explanation,
+      hint: hint ?? this.hint,
+    );
+  }
+}
+
+/// Interactive MCQ Quiz / NotebookLM Imported Quiz
+class QuizModel {
+  static const String resourceUrlPrefix = 'ccquiz://';
+
+  final String id;
+  final String subjectId;
+  final String title;
+  final String description;
+  final String? sourceUrl;
+  final List<QuizQuestionModel> questions;
+  final String createdBy;
+  final DateTime createdAt;
+
+  const QuizModel({
+    required this.id,
+    required this.subjectId,
+    required this.title,
+    this.description = '',
+    this.sourceUrl,
+    required this.questions,
+    this.createdBy = 'Admin',
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'subject_id': subjectId,
+        'title': title,
+        'description': description,
+        'source_url': sourceUrl,
+        'questions': questions.map((q) => q.toMap()).toList(),
+        'created_by': createdBy,
+        'created_at': createdAt.toIso8601String(),
+      };
+
+  factory QuizModel.fromMap(Map<String, dynamic> map) {
+    final rawQuestions = (map['questions'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(QuizQuestionModel.fromMap)
+        .toList();
+    return QuizModel(
+      id: map['id']?.toString() ??
+          'quiz_${DateTime.now().millisecondsSinceEpoch}',
+      subjectId: map['subject_id']?.toString() ?? 's1',
+      title: map['title']?.toString() ?? 'Untitled Quiz',
+      description: map['description']?.toString() ?? '',
+      sourceUrl: map['source_url'] as String?,
+      questions: rawQuestions,
+      createdBy: map['created_by']?.toString() ?? 'Admin',
+      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+          DateTime.now(),
+    );
+  }
+
+  /// Encodes this quiz as a `public.resources` row so it syncs across all devices
+  /// without requiring manual Supabase SQL migrations.
+  Map<String, dynamic> toResourcePayload() {
+    final encoded = base64Url.encode(utf8.encode(jsonEncode(toMap())));
+    final y = createdAt.year.toString().padLeft(4, '0');
+    final m = createdAt.month.toString().padLeft(2, '0');
+    final d = createdAt.day.toString().padLeft(2, '0');
+    return {
+      'id': id,
+      'subject_id': subjectId,
+      'date': '$y-$m-$d',
+      'uploader_id': null,
+      'uploader_name': createdBy,
+      'title': title,
+      'type': 'pdf',
+      'url': '$resourceUrlPrefix$encoded',
+      'upvotes': questions.length,
+      'cost_credits': 0,
+      'is_approved': true,
+    };
+  }
+
+  static QuizModel? tryFromResourceMap(Map<String, dynamic> map) {
+    final url = map['url'] as String? ?? '';
+    if (!url.startsWith(resourceUrlPrefix)) return null;
+    try {
+      final b64 = url.substring(resourceUrlPrefix.length).trim();
+      final decodedJson = utf8.decode(base64Url.decode(b64));
+      final payload = jsonDecode(decodedJson) as Map<String, dynamic>;
+      return QuizModel.fromMap(payload);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  QuizModel copyWith({
+    String? id,
+    String? subjectId,
+    String? title,
+    String? description,
+    String? sourceUrl,
+    List<QuizQuestionModel>? questions,
+    String? createdBy,
+    DateTime? createdAt,
+  }) {
+    return QuizModel(
+      id: id ?? this.id,
+      subjectId: subjectId ?? this.subjectId,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      sourceUrl: sourceUrl ?? this.sourceUrl,
+      questions: questions ?? this.questions,
+      createdBy: createdBy ?? this.createdBy,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+}
+
 

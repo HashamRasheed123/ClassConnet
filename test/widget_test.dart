@@ -3,13 +3,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:softwareclass/core/config/app_config.dart';
+import 'package:softwareclass/core/services/alert_scheduler.dart';
 import 'package:softwareclass/core/services/auth_service.dart';
+import 'package:softwareclass/core/services/offline_document_service.dart';
+import 'package:softwareclass/core/services/quiz_import_service.dart';
 import 'package:softwareclass/core/utils/formatters.dart';
+import 'package:softwareclass/core/utils/google_drive_util.dart';
 import 'package:softwareclass/models/models.dart';
 import 'package:softwareclass/core/constants/kzynovex_branding.dart';
+import 'package:softwareclass/core/utils/uuid_util.dart';
 import 'package:softwareclass/features/assignment_scanner/assignment_scanner_screen.dart';
 import 'package:softwareclass/features/shell/main_shell.dart';
 import 'package:softwareclass/features/splash/splash_screen.dart';
+import 'package:softwareclass/providers/class_providers.dart';
+import 'package:softwareclass/repositories/class_repository.dart';
 
 void main() {
   setUp(() {
@@ -455,5 +462,302 @@ void main() {
     expect(refreshedMary.isUploaderVerified, true);
     expect(refreshedMary.uploadRequestStatus, 'approved');
   });
+
+  test('AssignmentModel serialization and student completion privacy', () {
+    final now = DateTime.now();
+    final tomorrow = now.add(const Duration(days: 1));
+
+    final assignment = AssignmentModel(
+      id: 'a0000001-0000-0000-0000-000000000001',
+      subjectId: '11111111-1111-1111-1111-111111111111',
+      title: 'Lab 5: Dynamic Programming',
+      description: 'Solve knapsack and edit distance problems',
+      deadline: tomorrow,
+      driveUrl: 'https://drive.google.com/file/d/test',
+      createdBy: 'Admin Instructor',
+      createdAt: now,
+    );
+
+    final map = assignment.toMap();
+    expect(map['title'], 'Lab 5: Dynamic Programming');
+    expect(map['created_by'], 'Admin Instructor');
+
+    final parsed = AssignmentModel.fromMap(map);
+    expect(parsed.id, assignment.id);
+    expect(parsed.subjectId, assignment.subjectId);
+    expect(parsed.isDueTomorrow, true);
+
+    // Student completion state is client-side only (Set of IDs in SharedPreferences)
+    final studentACompleted = <String>{assignment.id};
+    final studentBCompleted = <String>{}; // Different student device
+
+    expect(studentACompleted.contains(assignment.id), true);
+    expect(studentBCompleted.contains(assignment.id), false);
+  });
+
+  test('ClassRepository normalizeOverridePayload cleanses invalid reporter IDs and normalizes UUIDs', () {
+    final rawPayload = {
+      'id': 'ov-raw-1',
+      'slot_id': 'slot-raw-1',
+      'reported_by': 'not-a-valid-uuid-admin',
+      'status': 'rescheduled',
+      'actual_start_time': '10:30',
+      'actual_end_time': '11:45',
+    };
+
+    final normalized = ClassRepository.normalizeOverridePayload(rawPayload);
+    // Invalid UUID for foreign key public.users(id) is stripped to prevent foreign key errors
+    expect(normalized.containsKey('reported_by'), false);
+    // ID and slot_id are formatted into valid deterministic UUIDs
+    expect(UuidUtil.isValidUuid(normalized['id']), true);
+    expect(UuidUtil.isValidUuid(normalized['slot_id']), true);
+  });
+
+  test('PostgreSQL time normalization, CC_META cloud fallback, and updated alarm occurrences work end-to-end', () {
+    // 1. Formatters.normalizeTime strips PostgreSQL seconds ("HH:MM:SS" -> "HH:mm")
+    expect(Formatters.normalizeTime('08:30:00'), '08:30');
+    expect(Formatters.normalizeTime('9:5'), '09:05');
+    expect(Formatters.normalizeOptionalTime('14:45:00'), '14:45');
+
+    // 2. DailyOverrideModel encodes & decodes [CC_META:...] when remote DB lacks optional columns
+    final encodedTopic = DailyOverrideModel.encodeMetaIntoTopic(
+      topicCovered: 'Moved for Lab Exam',
+      actualStartTime: '14:30:00',
+      actualEndTime: '16:00:00',
+      rescheduledDate: '2026-11-20',
+    );
+    expect(encodedTopic, contains('[CC_META:'));
+
+    final fallbackRowFromCloud = {
+      'id': '11111111-2222-3333-4444-555555555555',
+      'slot_id': 'aaaa1111-2222-3333-4444-555555555555',
+      'date': '2026-11-18',
+      'status': 'rescheduled',
+      'actual_room': 'Lab 4',
+      // Simulate unmigrated Supabase DB returning null for optional time/date columns:
+      'actual_start_time': null,
+      'actual_end_time': null,
+      'rescheduled_date': null,
+      'topic_covered': encodedTopic,
+      'is_approved': true,
+    };
+
+    final decodedOverride = DailyOverrideModel.fromMap(fallbackRowFromCloud);
+    expect(decodedOverride.actualStartTime, '14:30');
+    expect(decodedOverride.actualEndTime, '16:00');
+    expect(decodedOverride.rescheduledDate, DateTime(2026, 11, 20));
+    expect(decodedOverride.topicCovered, 'Moved for Lab Exam');
+
+    // 3. computeLecturesForDate and AlertScheduler.buildOccurrencesForTesting reflect updated meeting time & date
+    const subject = SubjectModel(
+      id: 'sub-se-1',
+      name: 'Software Construction',
+      code: 'SE-301',
+      professor: 'Dr. Adeel',
+    );
+    const slot = TimetableSlotModel(
+      id: 'aaaa1111-2222-3333-4444-555555555555',
+      subjectId: 'sub-se-1',
+      dayOfWeek: 3, // Wednesday (2026-11-18 is Wednesday)
+      startTime: '09:00:00',
+      endTime: '10:30:00',
+      defaultRoom: 'Room 101',
+    );
+
+    // On original Wednesday (2026-11-18), lecture is marked moved away to Friday (2026-11-20)
+    final wedLectures = computeLecturesForDate(
+      targetDate: DateTime(2026, 11, 18),
+      slots: [slot],
+      subjects: [subject],
+      overrides: [decodedOverride],
+    );
+    expect(wedLectures.length, 1);
+    expect(wedLectures.first.isDayMovedAway, true);
+
+    // On rescheduled Friday (2026-11-20), lecture appears at 14:30 - 16:00 in Lab 4
+    final friLectures = computeLecturesForDate(
+      targetDate: DateTime(2026, 11, 20),
+      slots: [slot],
+      subjects: [subject],
+      overrides: [decodedOverride],
+    );
+    expect(friLectures.length, 1);
+    expect(friLectures.first.effectiveStartTime, '14:30');
+    expect(friLectures.first.effectiveEndTime, '16:00');
+    expect(friLectures.first.effectiveRoom, 'Lab 4');
+    expect(friLectures.first.isTimeChanged, true);
+
+    // 4. AlertScheduler builds occurrences at the updated date & time (2026-11-20 14:30)
+    final occurrences = AlertScheduler.buildOccurrencesForTesting(
+      slots: [slot],
+      overrides: [decodedOverride],
+      referenceNow: DateTime(2026, 11, 17, 8, 0),
+    );
+    final shiftedOccurrence = occurrences.firstWhere(
+      (o) =>
+          o.startsAt.year == 2026 &&
+          o.startsAt.month == 11 &&
+          o.startsAt.day == 20,
+    );
+    expect(shiftedOccurrence.startsAt.hour, 14);
+    expect(shiftedOccurrence.startsAt.minute, 30);
+    expect(shiftedOccurrence.room, 'Lab 4');
+    expect(shiftedOccurrence.isChanged, true);
+  });
+
+  test('GoogleDriveUtil and OfflineDocumentService resolve Drive links, reject broken URLs, and auto-heal missing local files', () async {
+    const shareLink = 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view?usp=sharing';
+    expect(GoogleDriveUtil.extractFileId(shareLink), '1AbCdEfGhIjKlMnOpQrStUvWxYz');
+    expect(
+      GoogleDriveUtil.toDirectDownloadUrl(shareLink),
+      'https://drive.usercontent.google.com/download?id=1AbCdEfGhIjKlMnOpQrStUvWxYz&export=download&confirm=t',
+    );
+
+    const docLink = 'https://docs.google.com/document/d/1DocId999/edit?usp=sharing';
+    expect(
+      GoogleDriveUtil.toDirectDownloadUrl(docLink),
+      'https://docs.google.com/document/d/1DocId999/export?format=pdf',
+    );
+
+    // Google Drive folder link is recognized as a folder (not a single file)
+    const folderLink = 'https://drive.google.com/drive/folders/1nzIjg_GoQE8qyFB4e3Ough3KBXNRmD1M?usp=sharing';
+    expect(GoogleDriveUtil.isGoogleDriveFolder(folderLink), true);
+    expect(GoogleDriveUtil.extractFolderId(folderLink), '1nzIjg_GoQE8qyFB4e3Ough3KBXNRmD1M');
+    expect(GoogleDriveUtil.extractFileId(folderLink), null);
+    expect(GoogleDriveUtil.normalizeForComparison(folderLink), 'gdrive_folder:1nzijg_goqe8qyfb4e3ough3kbxnrmd1m');
+
+    // Invalid URL is gracefully rejected without crashing
+    final badRes = await OfflineDocumentService.instance.downloadAndCache(
+      url: 'not_a_valid_url',
+      title: 'Broken Link',
+    );
+    expect(badRes.success, false);
+    expect(badRes.errorType, OfflineDocErrorType.invalidUrl);
+
+    // Missing local:// file is gracefully reported as fileNotFoundLocally
+    final missingLocal = await OfflineDocumentService.instance.downloadAndCache(
+      url: 'local://vault/non_existent_doc.pdf',
+      title: 'Deleted Local Doc',
+    );
+    expect(missingLocal.success, false);
+    expect(missingLocal.errorType, OfflineDocErrorType.fileNotFoundLocally);
+  });
+
+  test('QuizModel cloud resource encoding & QuizImportService JSON and Text MCQ parsing', () {
+    // 1. Parse JSON format (NotebookLM Export / AI JSON format)
+    const jsonSample = '''
+    [
+      {
+        "question": "Which data structure uses LIFO order?",
+        "options": ["Queue", "Stack", "Heap", "Graph"],
+        "correctOptionIndex": 1,
+        "explanation": "Stack follows Last-In, First-Out."
+      }
+    ]
+    ''';
+    final fromJson = QuizImportService.parseQuizContent(jsonSample);
+    expect(fromJson.length, 1);
+    expect(fromJson.first.question, 'Which data structure uses LIFO order?');
+    expect(fromJson.first.options, ['Queue', 'Stack', 'Heap', 'Graph']);
+    expect(fromJson.first.correctOptionIndex, 1);
+    expect(fromJson.first.explanation, 'Stack follows Last-In, First-Out.');
+
+    // 2. Parse plain text / Markdown MCQs
+    const textSample = '''
+1. What is the time complexity of binary search?
+A) O(n)
+B) O(log n)
+C) O(n^2)
+D) O(1)
+Answer: B
+Explanation: Each step halves the search interval.
+
+2. Which keyword is used to inherit a class in Dart?
+A) implements
+B) extends (Correct)
+C) with
+D) super
+    ''';
+    final fromText = QuizImportService.parseQuizContent(textSample);
+    expect(fromText.length, 2);
+    expect(fromText[0].correctOptionIndex, 1);
+    expect(fromText[0].explanation, 'Each step halves the search interval.');
+    expect(fromText[1].correctOptionIndex, 1);
+    expect(fromText[1].options[1], 'extends');
+
+    // 3. Round-trip QuizModel through public.resources payload (ccquiz://)
+    final quiz = QuizModel(
+      id: 'c0000001-0000-0000-0000-000000000001',
+      subjectId: '11111111-1111-1111-1111-111111111111',
+      title: 'NotebookLM Quiz #1',
+      description: 'Imported from https://notebooklm.link.google/ELuWPoJL1iNe',
+      sourceUrl: 'https://notebooklm.link.google/ELuWPoJL1iNe',
+      questions: fromText,
+      createdBy: 'Admin',
+      createdAt: DateTime(2026, 11, 15),
+    );
+    final resourcePayload = quiz.toResourcePayload();
+    expect(
+      (resourcePayload['url'] as String).startsWith(QuizModel.resourceUrlPrefix),
+      true,
+    );
+    final decoded = QuizModel.tryFromResourceMap(resourcePayload);
+    expect(decoded, isNotNull);
+    expect(decoded!.title, 'NotebookLM Quiz #1');
+    expect(decoded.sourceUrl, 'https://notebooklm.link.google/ELuWPoJL1iNe');
+    expect(decoded.questions.length, 2);
+    expect(decoded.questions[0].correctOptionIndex, 1);
+
+    // 4. Parse AI JSON containing Markdown backslash escapes (\_, \*, \.) and HTML entities (&gt;, &lt;)
+    const aiEscapedJson = r'''
+    [
+      {
+        "question": "What type of discontinuity occurs at x = c when lim\_{x -&gt; c} f(x) = L exists?",
+        "options": ["x \* e^(x - 1)", "e^x", "Removable discontinuity", "1 / e^x"],
+        "correctOptionIndex": 2,
+        "explanation": "d/dx[f/g] = (g·f' - f·g') / [g]^2\. Valid for |x| &lt; 1\.",
+        "hint": "Look at x -&gt; c."
+      }
+    ]
+    ''';
+    final fromAiEscaped = QuizImportService.parseQuizContent(aiEscapedJson);
+    expect(fromAiEscaped.length, 1);
+    expect(
+      fromAiEscaped.first.question,
+      'What type of discontinuity occurs at x = c when lim_{x -> c} f(x) = L exists?',
+    );
+    expect(fromAiEscaped.first.options[0], 'x * e^(x - 1)');
+    expect(fromAiEscaped.first.correctOptionIndex, 2);
+  });
+
+  test('QuizScoreHistoryNotifier awards credits based on correct answers and improvement on retakes', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final initialCredits = container.read(currentUserProvider).credits;
+
+    // 1. First attempt: 14 out of 20 correct -> awards +14 credits
+    final earnedFirst = await container
+        .read(quizScoreHistoryProvider.notifier)
+        .recordScore(quizId: 'quiz_1', score: 14, totalQuestions: 20);
+    expect(earnedFirst, 14);
+    expect(container.read(currentUserProvider).credits, initialCredits + 14);
+
+    // 2. Second attempt with lower/equal score (12/20) -> 0 new credits (prevents farming)
+    final earnedSecond = await container
+        .read(quizScoreHistoryProvider.notifier)
+        .recordScore(quizId: 'quiz_1', score: 12, totalQuestions: 20);
+    expect(earnedSecond, 0);
+    expect(container.read(currentUserProvider).credits, initialCredits + 14);
+
+    // 3. Third attempt improving best score to 19/20 -> awards +5 additional credits (19 - 14)
+    final earnedThird = await container
+        .read(quizScoreHistoryProvider.notifier)
+        .recordScore(quizId: 'quiz_1', score: 19, totalQuestions: 20);
+    expect(earnedThird, 5);
+    expect(container.read(currentUserProvider).credits, initialCredits + 19);
+    expect(container.read(quizScoreHistoryProvider)['quiz_1']?.creditsEarned, 19);
+  });
 }
+
 

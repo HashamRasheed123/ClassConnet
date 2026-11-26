@@ -9,10 +9,23 @@
 class AppConfig {
   AppConfig._();
 
-  static const String _envUrl = String.fromEnvironment('SUPABASE_URL');
-  static const String _envKey = String.fromEnvironment('SUPABASE_KEY');
-  static const String _envAdminEmails = String.fromEnvironment('ADMIN_EMAILS');
-  static const String _envAdminPassword = String.fromEnvironment('ADMIN_PASSWORD');
+  static const String _envUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://hhaaxxiebirssgptxxgj.supabase.co',
+  );
+  static const String _envKey = String.fromEnvironment(
+    'SUPABASE_KEY',
+    defaultValue: 'sb_publishable_pNt757K0dR3ADojhtRMxjw_95RaD24K',
+  );
+  static const String _envAdminEmails = String.fromEnvironment(
+    'ADMIN_EMAILS',
+    defaultValue:
+        'fanhacker45f@gmail.com,kzynovexinc@gmail.com,muzammilsajid2000@gmail.com',
+  );
+  static const String _envAdminPassword = String.fromEnvironment(
+    'ADMIN_PASSWORD',
+    defaultValue: 'admin2026',
+  );
   static const String _envDbPassword = String.fromEnvironment('DB_PASSWORD');
 
   // Test / runtime overrides for mock environments and unit tests
@@ -75,8 +88,8 @@ class AppConfig {
       supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty;
 
   /// Application Versioning & Identity
-  static const String appVersion = '1.0.0';
-  static const int appVersionCode = 1;
+  static const String appVersion = '1.0.5';
+  static const int appVersionCode = 6;
   static const String appPackageName = 'com.softwareclass.softwareclass';
   static const String appBuildChannel = 'Signed Release';
 
