@@ -446,6 +446,7 @@ class DailyOverrideModel {
   final String? meetingUrl;
   final String? topicCovered;
   final String? reportedBy;
+  final String? reportedByName;
   final bool isApproved;
 
   const DailyOverrideModel({
@@ -460,6 +461,7 @@ class DailyOverrideModel {
     this.meetingUrl,
     this.topicCovered,
     this.reportedBy,
+    this.reportedByName,
     this.isApproved = false,
   });
 
@@ -493,6 +495,7 @@ class DailyOverrideModel {
     bool clearMeetingUrl = false,
     String? topicCovered,
     String? reportedBy,
+    String? reportedByName,
     bool? isApproved,
   }) {
     return DailyOverrideModel(
@@ -507,21 +510,23 @@ class DailyOverrideModel {
       meetingUrl: clearMeetingUrl ? null : (meetingUrl ?? this.meetingUrl),
       topicCovered: topicCovered ?? this.topicCovered,
       reportedBy: reportedBy ?? this.reportedBy,
+      reportedByName: reportedByName ?? this.reportedByName,
       isApproved: isApproved ?? this.isApproved,
     );
   }
 
   static final RegExp _metaPrefixRegex = RegExp(r'^\[CC_META:([^\]]*)\]\s*');
 
-  /// Encodes `actual_start_time`, `actual_end_time`, `rescheduled_date`, and `meeting_url`
-  /// into `topic_covered` so unmigrated Supabase instances without those columns
-  /// still persist and sync meeting time/date/link updates reliably.
+  /// Encodes `actual_start_time`, `actual_end_time`, `rescheduled_date`, `meeting_url`,
+  /// and `reported_by_name` into `topic_covered` so unmigrated Supabase instances
+  /// without those columns still persist and sync reliably.
   static String? encodeMetaIntoTopic({
     String? topicCovered,
     String? actualStartTime,
     String? actualEndTime,
     String? rescheduledDate,
     String? meetingUrl,
+    String? reportedByName,
   }) {
     final cleanTopic =
         (topicCovered ?? '').replaceFirst(_metaPrefixRegex, '').trim();
@@ -532,11 +537,16 @@ class DailyOverrideModel {
         : null;
     final cleanUrl =
         (meetingUrl != null && meetingUrl.trim().isNotEmpty) ? meetingUrl.trim() : null;
+    final cleanReporter =
+        (reportedByName != null && reportedByName.trim().isNotEmpty)
+            ? reportedByName.trim()
+            : null;
 
     if (normStart == null &&
         normEnd == null &&
         normDate == null &&
-        cleanUrl == null) {
+        cleanUrl == null &&
+        cleanReporter == null) {
       return cleanTopic.isEmpty ? null : cleanTopic;
     }
 
@@ -545,6 +555,7 @@ class DailyOverrideModel {
       if (normEnd != null) 'end=$normEnd',
       if (normDate != null) 'rdate=$normDate',
       if (cleanUrl != null) 'url=${Uri.encodeComponent(cleanUrl)}',
+      if (cleanReporter != null) 'rname=${Uri.encodeComponent(cleanReporter)}',
     ];
     final prefix = '[CC_META:${parts.join(';')}]';
     return cleanTopic.isEmpty ? prefix : '$prefix $cleanTopic';
@@ -556,6 +567,7 @@ class DailyOverrideModel {
     String? metaEnd;
     String? metaRDate;
     String? metaUrl;
+    String? metaReporterName;
 
     if (rawTopic != null) {
       final match = _metaPrefixRegex.firstMatch(rawTopic);
@@ -577,6 +589,13 @@ class DailyOverrideModel {
                   metaUrl = v;
                 }
               }
+              if (k == 'rname') {
+                try {
+                  metaReporterName = Uri.decodeComponent(v);
+                } catch (_) {
+                  metaReporterName = v;
+                }
+              }
             }
           }
         }
@@ -592,6 +611,11 @@ class DailyOverrideModel {
     final explicitUrl = (map['meeting_url'] as String?)?.trim();
     final resolvedUrl =
         (explicitUrl != null && explicitUrl.isNotEmpty) ? explicitUrl : metaUrl;
+    final explicitReporterName = (map['reported_by_name'] as String?)?.trim();
+    final resolvedReporterName =
+        (explicitReporterName != null && explicitReporterName.isNotEmpty)
+            ? explicitReporterName
+            : metaReporterName;
 
     return DailyOverrideModel(
       id: map['id'] as String,
@@ -607,6 +631,7 @@ class DailyOverrideModel {
       meetingUrl: resolvedUrl,
       topicCovered: rawTopic,
       reportedBy: map['reported_by'] as String?,
+      reportedByName: resolvedReporterName,
       isApproved: map['is_approved'] as bool? ?? false,
     );
   }
@@ -624,23 +649,28 @@ class DailyOverrideModel {
             meetingUrl?.trim().isNotEmpty == true ? meetingUrl!.trim() : null,
         'topic_covered': topicCovered,
         'reported_by': reportedBy,
+        'reported_by_name': reportedByName,
         'is_approved': isApproved,
       };
 }
 
 /// Academic resource / Vault item
 enum ResourceType {
-  pdf('PDF Document', Icons.picture_as_pdf_rounded),
-  image('Image & Slides', Icons.image_rounded),
-  youtube('Lecture Video', Icons.play_circle_filled_rounded);
+  notes('Notes', 'Notes', Icons.description_rounded),
+  pdf('PDF Document', 'PDF', Icons.picture_as_pdf_rounded),
+  folder('Shared Folder', 'Folder', Icons.folder_shared_rounded),
+  image('Slides & Images', 'Slides', Icons.image_rounded),
+  youtube('Lecture Video', 'Video', Icons.play_circle_filled_rounded);
 
-  const ResourceType(this.label, this.icon);
+  const ResourceType(this.label, this.shortLabel, this.icon);
   final String label;
+  final String shortLabel;
   final IconData icon;
 
   static ResourceType fromString(String val) {
+    final normalized = val.trim().toLowerCase();
     return ResourceType.values.firstWhere(
-      (t) => t.name == val,
+      (t) => t.name == normalized,
       orElse: () => ResourceType.pdf,
     );
   }
@@ -675,6 +705,18 @@ class ResourceModel {
     this.isUnlocked = false,
   });
 
+  static final RegExp _catTagPattern = RegExp(r'^\[CAT:(notes|folder)\]\s*');
+
+  /// Zero-migration fallback helper so Notes/Folder types survive older DB
+  /// check constraints (`('pdf', 'image', 'youtube')`).
+  static String encodeFallbackTitle(String title, ResourceType type) {
+    final clean = title.replaceFirst(_catTagPattern, '').trim();
+    if (type == ResourceType.notes || type == ResourceType.folder) {
+      return '[CAT:${type.name}] $clean';
+    }
+    return clean;
+  }
+
   ResourceModel copyWith({
     String? id,
     String? subjectId,
@@ -706,14 +748,23 @@ class ResourceModel {
   }
 
   factory ResourceModel.fromMap(Map<String, dynamic> map, {bool isUnlocked = false}) {
+    final rawTitle = map['title'] as String? ?? '';
+    final rawType = map['type'] as String? ?? 'pdf';
+    final match = _catTagPattern.firstMatch(rawTitle);
+    final decodedTitle =
+        match != null ? rawTitle.substring(match.end).trim() : rawTitle;
+    final parsedType = (rawType == 'pdf' && match != null)
+        ? ResourceType.fromString(match.group(1)!)
+        : ResourceType.fromString(rawType);
+
     return ResourceModel(
       id: map['id'] as String,
       subjectId: map['subject_id'] as String,
       date: DateTime.parse(map['date'] as String),
       uploaderId: map['uploader_id'] as String?,
       uploaderName: map['uploader_name'] as String? ?? 'Classmate',
-      title: map['title'] as String,
-      type: ResourceType.fromString(map['type'] as String? ?? 'pdf'),
+      title: decodedTitle.isNotEmpty ? decodedTitle : rawTitle,
+      type: parsedType,
       url: map['url'] as String,
       upvotes: (map['upvotes'] as num?)?.toInt() ?? 0,
       costCredits: (map['cost_credits'] as num?)?.toInt() ?? 5,
@@ -871,25 +922,76 @@ class AttendanceRecord {
     );
   }
 
+  bool isSafe(int minPct) => total == 0 || (percentage + 1e-9) >= minPct;
+
   /// Calculates bunk safety:
   /// returns positive number if safe to bunk X lectures,
   /// returns negative number indicating X consecutive lectures needed.
   int bunkAllowance(int minPct) {
-    if (total == 0) return 0;
+    if (total <= 0 || minPct <= 0) return 0;
+    if (minPct >= 100) {
+      return attended >= total ? 0 : -(total - attended);
+    }
     final target = minPct / 100.0;
-    if (percentage >= minPct) {
+    if (percentage + 1e-9 >= minPct) {
       // (attended) / (total + X) >= target  =>  X <= (attended / target) - total
-      final maxMissable = (attended / target) - total;
-      return maxMissable.floor();
+      final maxMissable = (attended / target) - total + 1e-9;
+      return maxMissable.floor().clamp(0, 9999);
     } else {
       // (attended + Y) / (total + Y) >= target => Y >= (target*total - attended)/(1 - target)
-      final needed = ((target * total) - attended) / (1.0 - target);
-      return -needed.ceil();
+      final needed = (((target * total) - attended) / (1.0 - target)) - 1e-9;
+      return -needed.ceil().clamp(1, 9999);
     }
+  }
+
+  /// Human-readable Safe-Bunk advice string for cards & alarm feedback.
+  String statusSummary(String courseName, int minPct) {
+    if (total == 0) {
+      return 'No classes logged yet — tap Present or Absent after your lecture.';
+    }
+    if (isSafe(minPct)) {
+      final margin = bunkAllowance(minPct);
+      if (margin == 0) {
+        return "On the edge! Don't miss the next $courseName lecture to stay at $minPct%.";
+      }
+      return 'You can safely miss $margin more $courseName lecture${margin == 1 ? '' : 's'}.';
+    }
+    final needed = bunkAllowance(minPct).abs();
+    return 'Danger: Attend the next $needed class${needed == 1 ? '' : 'es'} to hit $minPct%.';
   }
 }
 
 /// Academic Assignment Model
+enum TaskCategory {
+  assignment('Assignment', 'Assignments', '📝'),
+  quiz('Quiz', 'Quizzes', '🧠'),
+  presentation('Presentation', 'Presentations', '🎤');
+
+  const TaskCategory(this.label, this.pluralLabel, this.emoji);
+  final String label;
+  final String pluralLabel;
+  final String emoji;
+
+  IconData get icon {
+    switch (this) {
+      case TaskCategory.assignment:
+        return Icons.assignment_rounded;
+      case TaskCategory.quiz:
+        return Icons.quiz_rounded;
+      case TaskCategory.presentation:
+        return Icons.co_present_rounded;
+    }
+  }
+
+  static TaskCategory fromString(String? value) {
+    final v = (value ?? '').trim().toLowerCase();
+    return TaskCategory.values.firstWhere(
+      (c) => c.name == v,
+      orElse: () => TaskCategory.assignment,
+    );
+  }
+}
+
 class AssignmentModel {
   final String id;
   final String subjectId;
@@ -899,6 +1001,7 @@ class AssignmentModel {
   final String? driveUrl;
   final String createdBy;
   final DateTime createdAt;
+  final TaskCategory category;
 
   const AssignmentModel({
     required this.id,
@@ -909,7 +1012,19 @@ class AssignmentModel {
     this.driveUrl,
     required this.createdBy,
     required this.createdAt,
+    this.category = TaskCategory.assignment,
   });
+
+  static final RegExp _taskTagPattern =
+      RegExp(r'^\[TASK:(quiz|presentation)\]\s*');
+
+  /// Zero-migration fallback encoder when `public.assignments.category` column
+  /// hasn't been added yet on Supabase.
+  static String encodeCategoryInDescription(String desc, TaskCategory cat) {
+    final clean = desc.replaceFirst(_taskTagPattern, '').trim();
+    if (cat == TaskCategory.assignment) return clean;
+    return '[TASK:${cat.name}]${clean.isEmpty ? '' : ' $clean'}';
+  }
 
   bool get isDueTomorrow {
     final now = DateTime.now();
@@ -946,6 +1061,7 @@ class AssignmentModel {
         'subject_id': subjectId,
         'title': title,
         'description': description,
+        'category': category.name,
         'deadline': deadline.toIso8601String(),
         'drive_url': driveUrl,
         'created_by': createdBy,
@@ -953,17 +1069,36 @@ class AssignmentModel {
       };
 
   factory AssignmentModel.fromMap(Map<String, dynamic> map) {
+    final rawDesc = map['description'] as String? ?? '';
+    final rawCategory = map['category'] as String?;
+    final tagMatch = _taskTagPattern.firstMatch(rawDesc);
+
+    final TaskCategory resolvedCategory;
+    if (rawCategory != null &&
+        rawCategory.trim().isNotEmpty &&
+        rawCategory.trim().toLowerCase() != 'assignment') {
+      resolvedCategory = TaskCategory.fromString(rawCategory);
+    } else if (tagMatch != null) {
+      resolvedCategory = TaskCategory.fromString(tagMatch.group(1));
+    } else {
+      resolvedCategory = TaskCategory.fromString(rawCategory);
+    }
+
+    final cleanedDesc =
+        tagMatch != null ? rawDesc.substring(tagMatch.end).trim() : rawDesc;
+
     return AssignmentModel(
       id: map['id'] as String,
       subjectId: map['subject_id'] as String? ?? '',
-      title: map['title'] as String? ?? 'Untitled Assignment',
-      description: map['description'] as String? ?? '',
+      title: map['title'] as String? ?? 'Untitled Task',
+      description: cleanedDesc,
       deadline: DateTime.parse(
           map['deadline'] as String? ?? DateTime.now().toIso8601String()),
       driveUrl: map['drive_url'] as String?,
       createdBy: map['created_by'] as String? ?? 'Admin',
       createdAt: DateTime.parse(
           map['created_at'] as String? ?? DateTime.now().toIso8601String()),
+      category: resolvedCategory,
     );
   }
 
@@ -976,6 +1111,7 @@ class AssignmentModel {
     String? driveUrl,
     String? createdBy,
     DateTime? createdAt,
+    TaskCategory? category,
   }) {
     return AssignmentModel(
       id: id ?? this.id,
@@ -986,6 +1122,7 @@ class AssignmentModel {
       driveUrl: driveUrl ?? this.driveUrl,
       createdBy: createdBy ?? this.createdBy,
       createdAt: createdAt ?? this.createdAt,
+      category: category ?? this.category,
     );
   }
 }
@@ -1164,6 +1301,366 @@ class QuizModel {
       createdBy: createdBy ?? this.createdBy,
       createdAt: createdAt ?? this.createdAt,
     );
+  }
+}
+
+/// Student Verification Badge Request (Name + Roll No -> Admin Verification)
+class StudentVerificationRequestModel {
+  static const String resourceUrlPrefix = 'ccverify://';
+
+  final String id;
+  final String userId;
+  final String email;
+  final String name;
+  final String rollNo;
+  final String status; // 'pending' | 'approved' | 'rejected'
+  final String? rejectionReason;
+  final DateTime submittedAt;
+  final DateTime? reviewedAt;
+  final String? reviewedBy;
+
+  const StudentVerificationRequestModel({
+    required this.id,
+    required this.userId,
+    required this.email,
+    required this.name,
+    required this.rollNo,
+    this.status = 'pending',
+    this.rejectionReason,
+    required this.submittedAt,
+    this.reviewedAt,
+    this.reviewedBy,
+  });
+
+  bool get isPending => status == 'pending';
+  bool get isApproved => status == 'approved';
+  bool get isRejected => status == 'rejected';
+
+  StudentVerificationRequestModel copyWith({
+    String? id,
+    String? userId,
+    String? email,
+    String? name,
+    String? rollNo,
+    String? status,
+    String? rejectionReason,
+    DateTime? submittedAt,
+    DateTime? reviewedAt,
+    String? reviewedBy,
+  }) {
+    return StudentVerificationRequestModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      email: email ?? this.email,
+      name: name ?? this.name,
+      rollNo: rollNo ?? this.rollNo,
+      status: status ?? this.status,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
+      submittedAt: submittedAt ?? this.submittedAt,
+      reviewedAt: reviewedAt ?? this.reviewedAt,
+      reviewedBy: reviewedBy ?? this.reviewedBy,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'user_id': userId,
+        'email': email,
+        'name': name,
+        'roll_no': rollNo,
+        'status': status,
+        'rejection_reason': rejectionReason,
+        'submitted_at': submittedAt.toIso8601String(),
+        'reviewed_at': reviewedAt?.toIso8601String(),
+        'reviewed_by': reviewedBy,
+      };
+
+  factory StudentVerificationRequestModel.fromMap(Map<String, dynamic> map) {
+    return StudentVerificationRequestModel(
+      id: map['id']?.toString() ?? '',
+      userId: map['user_id']?.toString() ?? '',
+      email: (map['email'] as String? ?? '').trim().toLowerCase(),
+      name: map['name'] as String? ?? '',
+      rollNo: (map['roll_no'] as String? ?? '').trim().toUpperCase(),
+      status: map['status'] as String? ?? 'pending',
+      rejectionReason: map['rejection_reason'] as String?,
+      submittedAt:
+          DateTime.tryParse(map['submitted_at']?.toString() ?? '') ??
+              DateTime.now(),
+      reviewedAt: map['reviewed_at'] != null
+          ? DateTime.tryParse(map['reviewed_at'].toString())
+          : null,
+      reviewedBy: map['reviewed_by'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toResourcePayload() {
+    final encoded = base64Url.encode(utf8.encode(jsonEncode(toMap())));
+    final y = submittedAt.year.toString().padLeft(4, '0');
+    final m = submittedAt.month.toString().padLeft(2, '0');
+    final d = submittedAt.day.toString().padLeft(2, '0');
+    return {
+      'id': id,
+      'subject_id': '11111111-1111-1111-1111-111111111111',
+      'date': '$y-$m-$d',
+      'uploader_id': null,
+      'uploader_name': '$name ($rollNo)',
+      'title': 'Verification: $rollNo',
+      'type': 'pdf',
+      'url': '$resourceUrlPrefix$encoded',
+      'upvotes': 0,
+      'cost_credits': 0,
+      'is_approved': true,
+    };
+  }
+
+  static StudentVerificationRequestModel? tryFromResourceMap(
+      Map<String, dynamic> map) {
+    final url = map['url'] as String? ?? '';
+    if (!url.startsWith(resourceUrlPrefix)) return null;
+    try {
+      final b64 = url.substring(resourceUrlPrefix.length).trim();
+      final decodedJson = utf8.decode(base64Url.decode(b64));
+      final payload = jsonDecode(decodedJson) as Map<String, dynamic>;
+      return StudentVerificationRequestModel.fromMap(payload);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/// Anti-Scam Escrowed Note Bounty / Help Request
+class NoteBountyModel {
+  static const String resourceUrlPrefix = 'ccbounty://';
+
+  final String id;
+  final String subjectId;
+  final String title;
+  final String description;
+  final int rewardCredits;
+  final String requesterId;
+  final String requesterName;
+  final String? requesterRollNo;
+  final String status; // 'open' | 'submitted' | 'disputed' | 'completed' | 'cancelled'
+  final String? helperId;
+  final String? helperName;
+  final String? helperRollNo;
+  final String? solutionText;
+  final String? solutionUrl;
+  final String? disputeReason;
+  final bool payoutReleased;
+  final DateTime createdAt;
+  final DateTime? submittedAt;
+  final DateTime? resolvedAt;
+  final String? resolvedBy;
+
+  const NoteBountyModel({
+    required this.id,
+    required this.subjectId,
+    required this.title,
+    this.description = '',
+    required this.rewardCredits,
+    required this.requesterId,
+    required this.requesterName,
+    this.requesterRollNo,
+    this.status = 'open',
+    this.helperId,
+    this.helperName,
+    this.helperRollNo,
+    this.solutionText,
+    this.solutionUrl,
+    this.disputeReason,
+    this.payoutReleased = false,
+    required this.createdAt,
+    this.submittedAt,
+    this.resolvedAt,
+    this.resolvedBy,
+  });
+
+  bool get isOpen => status == 'open';
+  bool get isSubmitted => status == 'submitted';
+  bool get isDisputed => status == 'disputed';
+  bool get isCompleted => status == 'completed';
+  bool get isCancelled => status == 'cancelled';
+  bool get needsReview => isSubmitted || isDisputed;
+
+  /// Anti-scam locked preview: exposes only the first ~45% of submitted text
+  /// clearly and converts the remaining ~55% into scrambled rubbish blocks so
+  /// a requester can judge relevance without stealing the full document before
+  /// confirming payout.
+  ({String visibleHalf, String garbledHalf}) buildLockedPreview() {
+    final raw = (solutionText ?? '').trim();
+    if (raw.isEmpty) {
+      return (visibleHalf: '', garbledHalf: '');
+    }
+    final splitIdx = raw.length > 40
+        ? (raw.length * 0.45).round().clamp(24, 240)
+        : (raw.length / 2).ceil();
+    final safeSplit = splitIdx.clamp(1, raw.length);
+    final visible = raw.substring(0, safeSplit);
+    final remainder = raw.substring(safeSplit);
+    if (remainder.isEmpty) {
+      return (visibleHalf: visible, garbledHalf: '');
+    }
+
+    const maskGlyphs = ['█', '▓', '▒', '░', '◊', '▪', '×', '‡'];
+    final buf = StringBuffer();
+    for (int i = 0; i < remainder.length; i++) {
+      final ch = remainder[i];
+      if (ch == ' ' || ch == '\n' || ch == '\t') {
+        buf.write(ch);
+      } else {
+        buf.write(maskGlyphs[(i * 7 + ch.codeUnitAt(0)) % maskGlyphs.length]);
+      }
+    }
+    return (visibleHalf: visible, garbledHalf: buf.toString());
+  }
+
+  /// Hides the full attachment URL before payout so the document cannot be
+  /// downloaded until the requester or admin confirms the bounty payout.
+  String? get maskedAttachmentLabel {
+    final raw = solutionUrl?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    final host = (uri != null && uri.host.isNotEmpty) ? uri.host : 'document link';
+    return 'Attached Document ($host) — Unlock payout to download';
+  }
+
+  NoteBountyModel copyWith({
+    String? id,
+    String? subjectId,
+    String? title,
+    String? description,
+    int? rewardCredits,
+    String? requesterId,
+    String? requesterName,
+    String? requesterRollNo,
+    String? status,
+    String? helperId,
+    bool clearHelper = false,
+    String? helperName,
+    String? helperRollNo,
+    String? solutionText,
+    bool clearSolution = false,
+    String? solutionUrl,
+    String? disputeReason,
+    bool? payoutReleased,
+    DateTime? createdAt,
+    DateTime? submittedAt,
+    DateTime? resolvedAt,
+    String? resolvedBy,
+  }) {
+    return NoteBountyModel(
+      id: id ?? this.id,
+      subjectId: subjectId ?? this.subjectId,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      rewardCredits: rewardCredits ?? this.rewardCredits,
+      requesterId: requesterId ?? this.requesterId,
+      requesterName: requesterName ?? this.requesterName,
+      requesterRollNo: requesterRollNo ?? this.requesterRollNo,
+      status: status ?? this.status,
+      helperId: clearHelper ? null : (helperId ?? this.helperId),
+      helperName: clearHelper ? null : (helperName ?? this.helperName),
+      helperRollNo: clearHelper ? null : (helperRollNo ?? this.helperRollNo),
+      solutionText: clearSolution ? null : (solutionText ?? this.solutionText),
+      solutionUrl: clearSolution ? null : (solutionUrl ?? this.solutionUrl),
+      disputeReason: clearSolution ? null : (disputeReason ?? this.disputeReason),
+      payoutReleased: payoutReleased ?? this.payoutReleased,
+      createdAt: createdAt ?? this.createdAt,
+      submittedAt: clearSolution ? null : (submittedAt ?? this.submittedAt),
+      resolvedAt: resolvedAt ?? this.resolvedAt,
+      resolvedBy: resolvedBy ?? this.resolvedBy,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'subject_id': subjectId,
+        'title': title,
+        'description': description,
+        'reward_credits': rewardCredits,
+        'requester_id': requesterId,
+        'requester_name': requesterName,
+        'requester_roll_no': requesterRollNo,
+        'status': status,
+        'helper_id': helperId,
+        'helper_name': helperName,
+        'helper_roll_no': helperRollNo,
+        'solution_text': solutionText,
+        'solution_url': solutionUrl,
+        'dispute_reason': disputeReason,
+        'payout_released': payoutReleased,
+        'created_at': createdAt.toIso8601String(),
+        'submitted_at': submittedAt?.toIso8601String(),
+        'resolved_at': resolvedAt?.toIso8601String(),
+        'resolved_by': resolvedBy,
+      };
+
+  factory NoteBountyModel.fromMap(Map<String, dynamic> map) {
+    return NoteBountyModel(
+      id: map['id']?.toString() ?? '',
+      subjectId: map['subject_id']?.toString() ?? '',
+      title: map['title'] as String? ?? 'Note Request',
+      description: map['description'] as String? ?? '',
+      rewardCredits: (map['reward_credits'] as num?)?.toInt() ?? 20,
+      requesterId: map['requester_id']?.toString() ?? '',
+      requesterName: map['requester_name'] as String? ?? 'Student',
+      requesterRollNo: map['requester_roll_no'] as String?,
+      status: map['status'] as String? ?? 'open',
+      helperId: map['helper_id']?.toString(),
+      helperName: map['helper_name'] as String?,
+      helperRollNo: map['helper_roll_no'] as String?,
+      solutionText: map['solution_text'] as String?,
+      solutionUrl: map['solution_url'] as String?,
+      disputeReason: map['dispute_reason'] as String?,
+      payoutReleased: map['payout_released'] as bool? ?? false,
+      createdAt:
+          DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+              DateTime.now(),
+      submittedAt: map['submitted_at'] != null
+          ? DateTime.tryParse(map['submitted_at'].toString())
+          : null,
+      resolvedAt: map['resolved_at'] != null
+          ? DateTime.tryParse(map['resolved_at'].toString())
+          : null,
+      resolvedBy: map['resolved_by'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toResourcePayload() {
+    final encoded = base64Url.encode(utf8.encode(jsonEncode(toMap())));
+    final y = createdAt.year.toString().padLeft(4, '0');
+    final m = createdAt.month.toString().padLeft(2, '0');
+    final d = createdAt.day.toString().padLeft(2, '0');
+    return {
+      'id': id,
+      'subject_id': subjectId.isNotEmpty
+          ? subjectId
+          : '11111111-1111-1111-1111-111111111111',
+      'date': '$y-$m-$d',
+      'uploader_id': null,
+      'uploader_name': requesterName,
+      'title': title,
+      'type': 'pdf',
+      'url': '$resourceUrlPrefix$encoded',
+      'upvotes': rewardCredits,
+      'cost_credits': rewardCredits,
+      'is_approved': true,
+    };
+  }
+
+  static NoteBountyModel? tryFromResourceMap(Map<String, dynamic> map) {
+    final url = map['url'] as String? ?? '';
+    if (!url.startsWith(resourceUrlPrefix)) return null;
+    try {
+      final b64 = url.substring(resourceUrlPrefix.length).trim();
+      final decodedJson = utf8.decode(base64Url.decode(b64));
+      final payload = jsonDecode(decodedJson) as Map<String, dynamic>;
+      return NoteBountyModel.fromMap(payload);
+    } catch (_) {
+      return null;
+    }
   }
 }
 

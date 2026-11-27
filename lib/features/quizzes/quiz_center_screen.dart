@@ -104,14 +104,14 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
                         color: AppColors.primarySoft,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.quiz_outlined,
                         color: AppColors.primary,
                         size: 36,
                       ),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
+                    Text(
                       'No Quizzes Yet',
                       style: TextStyle(
                         fontSize: 17,
@@ -125,7 +125,7 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
                           ? 'Tap "+ Add / Import NotebookLM Quiz" to pull MCQs from a NotebookLM link or paste questions.'
                           : 'Your admin has not published any quizzes for this filter yet.',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         color: AppColors.textSecondary,
                       ),
@@ -177,7 +177,7 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
 
     if (widget.embeddedInAdmin) {
       return Scaffold(
-        backgroundColor: AppColors.background,
+        backgroundColor: context.palette.background,
         body: bodyContent,
         floatingActionButton: user.isAdmin
             ? FloatingActionButton.extended(
@@ -196,12 +196,12 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
     }
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.palette.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: context.palette.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: const Column(
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
@@ -209,7 +209,7 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary,
+                color: context.palette.textPrimary,
               ),
             ),
             Text(
@@ -217,7 +217,7 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
+                color: context.palette.textSecondary,
               ),
             ),
           ],
@@ -233,7 +233,7 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
+                Icon(
                   Icons.bolt_rounded,
                   size: 15,
                   color: AppColors.primary,
@@ -241,7 +241,7 @@ class _QuizCenterScreenState extends ConsumerState<QuizCenterScreen> {
                 const SizedBox(width: 3),
                 Text(
                   '${user.credits} Credits',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w800,
                     color: AppColors.primary,
@@ -431,7 +431,7 @@ class _QuizCenterHeroBanner extends StatelessWidget {
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.white,
-                  foregroundColor: AppColors.primary,
+                  foregroundColor: AppColors.secondary,
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -472,7 +472,7 @@ class _SubjectChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary : Colors.white,
+          color: isSelected ? AppColors.primary : AppColors.cardSurface,
           borderRadius: BorderRadius.circular(AppRadii.pill),
           border: Border.all(
             color: isSelected ? AppColors.primary : AppColors.border,
@@ -520,9 +520,9 @@ class _QuizCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.palette.cardSurface,
         borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: context.palette.border),
         boxShadow: AppShadows.card,
       ),
       child: Column(
@@ -542,7 +542,7 @@ class _QuizCard extends StatelessWidget {
                   subject != null
                       ? '${subject!.code} • ${subject!.name}'
                       : 'General Quiz',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
                     color: AppColors.primary,
@@ -554,15 +554,15 @@ class _QuizCard extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFECFDF5),
+                  color: AppColors.successBg,
                   borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
                 child: Text(
                   '${quiz.questions.length} MCQs',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF047857),
+                    color: AppColors.successText,
                   ),
                 ),
               ),
@@ -572,24 +572,24 @@ class _QuizCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
+                    color: AppColors.warningBg,
                     borderRadius: BorderRadius.circular(AppRadii.pill),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.bolt_rounded,
                         size: 13,
-                        color: Color(0xFFB45309),
+                        color: AppColors.warningText,
                       ),
                       const SizedBox(width: 2),
                       Text(
                         '+${quiz.questions.length} Credits',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFFB45309),
+                          color: AppColors.warningText,
                         ),
                       ),
                     ],
@@ -602,7 +602,7 @@ class _QuizCard extends StatelessWidget {
                   visualDensity: VisualDensity.compact,
                   tooltip: 'Edit Quiz',
                   onPressed: onEdit,
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.edit_outlined,
                     size: 18,
                     color: AppColors.textSecondary,
@@ -626,7 +626,7 @@ class _QuizCard extends StatelessWidget {
           // Title & description
           Text(
             quiz.title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w800,
               color: AppColors.textPrimary,
@@ -636,7 +636,7 @@ class _QuizCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               quiz.description,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 color: AppColors.textSecondary,
                 height: 1.35,
@@ -665,20 +665,20 @@ class _QuizCard extends StatelessWidget {
                         vertical: 5,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
+                        color: AppColors.blueBg,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color:
                               const Color(0xFF2563EB).withValues(alpha: 0.25),
                         ),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
                             Icons.auto_awesome_rounded,
                             size: 13,
-                            color: Color(0xFF1D4ED8),
+                            color: AppColors.blueText,
                           ),
                           SizedBox(width: 5),
                           Text(
@@ -686,14 +686,14 @@ class _QuizCard extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF1D4ED8),
+                              color: AppColors.blueText,
                             ),
                           ),
                           SizedBox(width: 4),
                           Icon(
                             Icons.open_in_new_rounded,
                             size: 12,
-                            color: Color(0xFF1D4ED8),
+                            color: AppColors.blueText,
                           ),
                         ],
                       ),
@@ -706,24 +706,24 @@ class _QuizCard extends StatelessWidget {
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
+                      color: AppColors.warningBg,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.emoji_events_rounded,
                           size: 14,
-                          color: Color(0xFFB45309),
+                          color: AppColors.warningText,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           'Best: ${scoreRecord!.bestScore}/${scoreRecord!.totalQuestions} (${scoreRecord!.bestPercentage.round()}%) • +${scoreRecord!.creditsEarned} Credits Earned',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFFB45309),
+                            color: AppColors.warningText,
                           ),
                         ),
                       ],
@@ -742,7 +742,7 @@ class _QuizCard extends StatelessWidget {
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
-                    side: const BorderSide(color: AppColors.primary),
+                    side: BorderSide(color: AppColors.primary),
                     padding: const EdgeInsets.symmetric(vertical: 11),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(11),
@@ -906,17 +906,17 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
   Widget build(BuildContext context) {
     if (_questions.isEmpty) {
       return Scaffold(
-        backgroundColor: AppColors.background,
+        backgroundColor: context.palette.background,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: context.palette.surface,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           title: Text(
             widget.quiz.title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
+              color: context.palette.textPrimary,
             ),
           ),
         ),
@@ -928,18 +928,18 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(18),
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: AppColors.primarySoft,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.psychology_alt_rounded,
                     color: AppColors.primary,
                     size: 38,
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   'No MCQ Questions in This Set Yet',
                   style: TextStyle(
                     fontSize: 17,
@@ -948,7 +948,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Questions can be added by the Admin or opened via the NotebookLM source link below.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -982,9 +982,9 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
         : _isTestSubmitted;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.palette.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: context.palette.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         title: Column(
@@ -994,10 +994,10 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
               widget.quiz.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary,
+                color: context.palette.textPrimary,
               ),
             ),
             Text(
@@ -1006,7 +1006,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                   : (_isTestSubmitted
                       ? 'Test Results & Answer Key Review'
                       : 'Test Mode • Answered ${_selectedOptions.length}/${_questions.length}'),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: AppColors.textSecondary,
@@ -1025,7 +1025,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
+                Icon(
                   Icons.bolt_rounded,
                   size: 14,
                   color: AppColors.primary,
@@ -1033,7 +1033,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                 const SizedBox(width: 3),
                 Text(
                   '${ref.watch(currentUserProvider).credits}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w800,
                     color: AppColors.primary,
@@ -1053,7 +1053,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
         children: [
           // 1. Mode Switcher + Question Palette Bar
           Container(
-            color: Colors.white,
+            color: AppColors.cardSurface,
             padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
             child: Column(
               children: [
@@ -1145,22 +1145,22 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
 
                       if (_isPracticeMode && picked != null) {
                         bg = isCorrect
-                            ? const Color(0xFFD1FAE5)
-                            : const Color(0xFFFEE2E2);
+                            ? AppColors.successBgStrong
+                            : AppColors.dangerBgStrong;
                         fg = isCorrect
-                            ? const Color(0xFF065F46)
-                            : const Color(0xFF991B1B);
+                            ? AppColors.successText
+                            : AppColors.dangerText;
                         borderCol = fg.withValues(alpha: 0.4);
                       } else if (!_isPracticeMode && _isTestSubmitted) {
                         if (picked == null) {
-                          bg = const Color(0xFFFEF3C7);
-                          fg = const Color(0xFF92400E);
+                          bg = AppColors.warningBg;
+                          fg = AppColors.warningTextDeep;
                         } else if (isCorrect) {
-                          bg = const Color(0xFFD1FAE5);
-                          fg = const Color(0xFF065F46);
+                          bg = AppColors.successBgStrong;
+                          fg = AppColors.successText;
                         } else {
-                          bg = const Color(0xFFFEE2E2);
-                          fg = const Color(0xFF991B1B);
+                          bg = AppColors.dangerBgStrong;
+                          fg = AppColors.dangerText;
                         }
                       } else if (picked != null) {
                         bg = AppColors.primarySoft;
@@ -1221,7 +1221,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.cardSurface,
                     borderRadius: BorderRadius.circular(AppRadii.card),
                     border: Border.all(color: AppColors.border),
                     boxShadow: AppShadows.card,
@@ -1243,7 +1243,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                             ),
                             child: Text(
                               'Question ${_currentIndex + 1} of ${_questions.length}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w800,
                                 color: AppColors.primary,
@@ -1285,7 +1285,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                       const SizedBox(height: 12),
                       Text(
                         q.question,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary,
@@ -1299,7 +1299,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFFFBEB),
+                            color: AppColors.urgentBg,
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
                               color: const Color(0xFFF59E0B)
@@ -1318,10 +1318,10 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                               Expanded(
                                 child: Text(
                                   'Hint: ${q.hint}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w600,
-                                    color: Color(0xFF92400E),
+                                    color: AppColors.warningTextDeep,
                                   ),
                                 ),
                               ),
@@ -1349,7 +1349,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
 
                   if (showAnswerFeedback) {
                     if (isCorrectOption) {
-                      cardBg = const Color(0xFFECFDF5);
+                      cardBg = AppColors.successBg;
                       borderCol = const Color(0xFF10B981);
                       badgeBg = const Color(0xFF10B981);
                       badgeFg = Colors.white;
@@ -1359,7 +1359,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                         size: 22,
                       );
                     } else if (isSelected && !isCorrectOption) {
-                      cardBg = const Color(0xFFFEF2F2);
+                      cardBg = AppColors.dangerBg;
                       borderCol = const Color(0xFFEF4444);
                       badgeBg = const Color(0xFFEF4444);
                       badgeFg = Colors.white;
@@ -1418,7 +1418,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                             Expanded(
                               child: Text(
                                 q.options[optIdx],
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                   color: AppColors.textPrimary,
@@ -1444,8 +1444,8 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: selectedIdx == q.correctOptionIndex
-                          ? const Color(0xFFECFDF5)
-                          : const Color(0xFFF3EEFF),
+                          ? AppColors.successBg
+                          : AppColors.primarySoft,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: selectedIdx == q.correctOptionIndex
@@ -1464,7 +1464,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                                   : Icons.info_outline_rounded,
                               size: 18,
                               color: selectedIdx == q.correctOptionIndex
-                                  ? const Color(0xFF047857)
+                                  ? AppColors.successText
                                   : AppColors.primary,
                             ),
                             const SizedBox(width: 8),
@@ -1476,7 +1476,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                                 color: selectedIdx == q.correctOptionIndex
-                                    ? const Color(0xFF047857)
+                                    ? AppColors.successText
                                     : AppColors.primary,
                               ),
                             ),
@@ -1487,7 +1487,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
                           const SizedBox(height: 6),
                           Text(
                             q.explanation!,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12.5,
                               color: AppColors.textPrimary,
                               height: 1.4,
@@ -1505,8 +1505,8 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
           // 3. Bottom Navigation & Submit Bar
           Container(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
+            decoration: BoxDecoration(
+              color: AppColors.cardSurface,
               border: Border(top: BorderSide(color: AppColors.border)),
             ),
             child: SafeArea(
@@ -1654,7 +1654,7 @@ class _QuizRunnerScreenState extends ConsumerState<QuizRunnerScreen> {
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.white,
-                  foregroundColor: AppColors.primary,
+                  foregroundColor: AppColors.secondary,
                   visualDensity: VisualDensity.compact,
                 ),
                 onPressed: _resetQuiz,
@@ -1823,7 +1823,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   'Options (tap radio button to mark the Correct Answer):',
                   style: TextStyle(
                     fontSize: 12,
@@ -1999,13 +1999,13 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.surface,
         surfaceTintColor: Colors.transparent,
         title: Text(
           widget.existing == null
               ? 'Add / Import NotebookLM Quiz'
               : 'Edit Quiz (${_questions.length} MCQs)',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w800,
             color: AppColors.textPrimary,
@@ -2041,7 +2041,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.cardSurface,
               borderRadius: BorderRadius.circular(AppRadii.card),
               border: Border.all(color: AppColors.border),
               boxShadow: AppShadows.card,
@@ -2049,7 +2049,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
                     Icon(
                       Icons.auto_awesome_rounded,
@@ -2201,7 +2201,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
                     ),
                     child: Text(
                       _importStatusMessage!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: AppColors.primary,
@@ -2219,7 +2219,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.cardSurface,
               borderRadius: BorderRadius.circular(AppRadii.card),
               border: Border.all(color: AppColors.border),
               boxShadow: AppShadows.card,
@@ -2227,7 +2227,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
                     Icon(
                       Icons.content_paste_go_rounded,
@@ -2248,7 +2248,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   'Paste questions copied from NotebookLM, or JSON exported using the AI Prompt above. Our parser automatically detects questions, options (A–D), correct answers, and explanations.',
                   style: TextStyle(
                     fontSize: 12,
@@ -2291,7 +2291,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
             children: [
               Text(
                 'Questions in this Quiz (${_questions.length})',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary,
@@ -2314,11 +2314,11 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.circular(AppRadii.card),
                 border: Border.all(color: AppColors.border),
               ),
-              child: const Center(
+              child: Center(
                 child: Text(
                   'No questions added yet. Use Smart Paste above or tap "Add Question Manually".',
                   textAlign: TextAlign.center,
@@ -2337,7 +2337,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.cardSurface,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                   ),
@@ -2357,7 +2357,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
                             ),
                             child: Text(
                               'Q${idx + 1}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
                                 color: AppColors.primary,
@@ -2388,7 +2388,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
                       const SizedBox(height: 6),
                       Text(
                         q.question,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary,
@@ -2421,7 +2421,7 @@ class _QuizEditorScreenState extends ConsumerState<_QuizEditorScreen> {
                                         ? FontWeight.w800
                                         : FontWeight.w500,
                                     color: isCorrect
-                                        ? const Color(0xFF047857)
+                                        ? AppColors.successText
                                         : AppColors.textSecondary,
                                   ),
                                 ),

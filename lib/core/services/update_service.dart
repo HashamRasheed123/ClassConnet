@@ -521,7 +521,7 @@ class UpdateService {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
-                                        color: Colors.white,
+                                        color: AppColors.cardSurface,
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: const Text(
@@ -559,7 +559,7 @@ class UpdateService {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
+                        color: AppColors.surfaceMuted,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
@@ -567,17 +567,17 @@ class UpdateService {
                         children: [
                           Text(
                             'Current: v${AppConfig.appVersion}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: AppColors.textSecondary,
                             ),
                           ),
-                          const Icon(Icons.arrow_forward_rounded,
+                          Icon(Icons.arrow_forward_rounded,
                               size: 14, color: AppColors.textSecondary),
                           Text(
                             'New: v${info.versionName}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w800,
                               color: AppColors.primary,
@@ -594,7 +594,7 @@ class UpdateService {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           "What's New in This Release",
                           style: TextStyle(
                             fontSize: 12,
@@ -608,7 +608,7 @@ class UpdateService {
                           width: double.infinity,
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
+                            color: AppColors.surfaceSubtle,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: AppColors.border),
                           ),
@@ -618,7 +618,7 @@ class UpdateService {
                               info.releaseNotes.trim().isNotEmpty
                                   ? info.releaseNotes
                                   : 'Performance optimizations, security patches, and user experience enhancements.',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 color: AppColors.textSecondary,
                                 height: 1.45,
@@ -641,13 +641,13 @@ class UpdateService {
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: errorText != null
-                              ? const Color(0xFFFEF2F2)
-                              : const Color(0xFFEFF6FF),
+                              ? AppColors.dangerBg
+                              : AppColors.blueBg,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: errorText != null
-                                ? const Color(0xFFFECACA)
-                                : const Color(0xFFBFDBFE),
+                                ? AppColors.dangerBorder
+                                : AppColors.blueBorder,
                           ),
                         ),
                         child: Column(
@@ -658,7 +658,7 @@ class UpdateService {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text(
+                                  Text(
                                     'Downloading Update...',
                                     style: TextStyle(
                                       fontSize: 12,
@@ -670,7 +670,7 @@ class UpdateService {
                                     progress > 0
                                         ? '${(progress * 100).toStringAsFixed(0)}%'
                                         : '...',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w900,
                                       color: AppColors.primary,
@@ -684,7 +684,7 @@ class UpdateService {
                                 child: LinearProgressIndicator(
                                   value: progress > 0 ? progress : null,
                                   minHeight: 8,
-                                  backgroundColor: const Color(0xFFDBEAFE),
+                                  backgroundColor: AppColors.blueBorder,
                                   color: AppColors.primary,
                                 ),
                               ),
@@ -821,7 +821,7 @@ class UpdateService {
                                     Navigator.pop(ctx);
                                     onLater?.call();
                                   },
-                                  child: const Text(
+                                  child: Text(
                                     'Remind Me Later',
                                     style: TextStyle(
                                       color: AppColors.textSecondary,
@@ -854,7 +854,7 @@ class UpdateService {
                                       );
                                     }
                                   },
-                                  child: const Text(
+                                  child: Text(
                                     'Skip This Version',
                                     style: TextStyle(
                                       color: AppColors.textSecondary,

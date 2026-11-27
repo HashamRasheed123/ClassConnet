@@ -39,10 +39,11 @@ class _EducationalAgreementDialogState
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context);
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 440),
         child: Padding(
@@ -76,7 +77,7 @@ class _EducationalAgreementDialogState
                     ),
                   ),
                   const SizedBox(width: 14),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -157,7 +158,7 @@ class _EducationalAgreementDialogState
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'I understand and accept the Educational Use & Academic Community Guidelines.',
                           style: TextStyle(
@@ -209,9 +210,9 @@ class _EducationalAgreementDialogState
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+        color: AppColors.surfaceSubtle,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -231,7 +232,7 @@ class _EducationalAgreementDialogState
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
@@ -240,7 +241,7 @@ class _EducationalAgreementDialogState
                 const SizedBox(height: 3),
                 Text(
                   description,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     color: AppColors.textSecondary,
                     height: 1.35,

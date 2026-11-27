@@ -21,8 +21,6 @@ class MainShell extends ConsumerStatefulWidget {
 
 class _MainShellState extends ConsumerState<MainShell>
     with WidgetsBindingObserver {
-  int _currentIndex = 0;
-
   static const List<Widget> _screens = [
     HomeScreen(),
     TimetableScreen(),
@@ -38,6 +36,8 @@ class _MainShellState extends ConsumerState<MainShell>
     WidgetsBinding.instance.addObserver(this);
     AlertScheduler.instance.activeAlarmNotifier
         .addListener(_onActiveAlarmChanged);
+    AlertScheduler.instance.attendanceSyncVersion
+        .addListener(_onAttendanceSynced);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // 1. Check for app updates
@@ -65,7 +65,15 @@ class _MainShellState extends ConsumerState<MainShell>
     WidgetsBinding.instance.removeObserver(this);
     AlertScheduler.instance.activeAlarmNotifier
         .removeListener(_onActiveAlarmChanged);
+    AlertScheduler.instance.attendanceSyncVersion
+        .removeListener(_onAttendanceSynced);
     super.dispose();
+  }
+
+  void _onAttendanceSynced() {
+    if (!mounted) return;
+    ref.read(attendanceProvider.notifier).reloadFromPrefs();
+    ref.read(dailyAttendanceMarksProvider.notifier).reloadFromPrefs();
   }
 
   @override
@@ -73,14 +81,16 @@ class _MainShellState extends ConsumerState<MainShell>
     if (state == AppLifecycleState.resumed && mounted) {
       // Pull latest cloud overrides/timetable/assignments on resume and resync alarms
       ref.read(syncStateProvider.notifier).triggerSync();
+      ref.read(attendanceProvider.notifier).reloadFromPrefs();
+      ref.read(dailyAttendanceMarksProvider.notifier).reloadFromPrefs();
     }
   }
 
   void _onActiveAlarmChanged() {
     final alarm = AlertScheduler.instance.activeAlarmNotifier.value;
     if (alarm != null && mounted) {
-      if (_currentIndex != 0) {
-        setState(() => _currentIndex = 0);
+      if (ref.read(mainShellTabProvider) != 0) {
+        ref.read(mainShellTabProvider.notifier).setTab(0);
       }
       // If a sub-route (e.g. Admin Console) is open, bring the user to Home Screen
       Navigator.of(context).popUntil((route) => route.isFirst);
@@ -121,6 +131,12 @@ class _MainShellState extends ConsumerState<MainShell>
     ref.listen(dailyOverridesProvider, (_, _) => _syncAllAlarms());
     ref.listen(assignmentsProvider, (_, _) => _syncAllAlarms());
     ref.listen(assignmentCompletionProvider, (_, _) => _syncAllAlarms());
+    ref.listen<CosmeticsState>(cosmeticsProvider, (prev, next) {
+      if (prev?.activeAlarmSound != next.activeAlarmSound ||
+          prev?.activeNotificationSound != next.activeNotificationSound) {
+        _syncAllAlarms();
+      }
+    });
     final pendingCount = ref.watch(pendingModQueueCountProvider);
     final user = ref.watch(currentUserProvider);
     final completedIds = ref.watch(assignmentCompletionProvider);
@@ -129,11 +145,13 @@ class _MainShellState extends ConsumerState<MainShell>
       return !isDone && (a.isDueTomorrow || a.isDueToday);
     }).length;
     final updateState = ref.watch(updateStateProvider);
+    final currentIndex = ref.watch(mainShellTabProvider);
+    final palette = context.palette;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: palette.background,
       body: IndexedStack(
-        index: _currentIndex,
+        index: currentIndex,
         children: _screens,
       ),
       bottomNavigationBar: Container(
@@ -144,9 +162,9 @@ class _MainShellState extends ConsumerState<MainShell>
         child: Container(
           height: 68,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: palette.surface,
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: AppColors.border, width: 1.2),
+            border: Border.all(color: palette.border, width: 1.2),
             boxShadow: AppShadows.floatingBar,
           ),
           child: Row(
@@ -207,16 +225,17 @@ class _MainShellState extends ConsumerState<MainShell>
     required String label,
     int? badgeCount,
   }) {
-    final isSelected = _currentIndex == index;
+    final isSelected = ref.watch(mainShellTabProvider) == index;
+    final palette = context.palette;
 
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () => ref.read(mainShellTabProvider.notifier).setTab(index),
       borderRadius: BorderRadius.circular(16),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primarySoft : Colors.transparent,
+          color: isSelected ? palette.primarySoft : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
@@ -229,7 +248,7 @@ class _MainShellState extends ConsumerState<MainShell>
                   isSelected ? activeIcon : icon,
                   size: 20,
                   color:
-                      isSelected ? AppColors.primary : AppColors.textSecondary,
+                      isSelected ? palette.primary : palette.textSecondary,
                 ),
                 if (badgeCount != null)
                   Positioned(
@@ -257,8 +276,8 @@ class _MainShellState extends ConsumerState<MainShell>
               const SizedBox(width: 6),
               Text(
                 label,
-                style: const TextStyle(
-                  color: AppColors.primary,
+                style: TextStyle(
+                  color: palette.primary,
                   fontWeight: FontWeight.w800,
                   fontSize: 12,
                 ),

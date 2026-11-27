@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/services/alert_scheduler.dart';
+import '../../core/services/attendance_storage.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
@@ -12,6 +13,8 @@ import '../../models/models.dart';
 import '../../providers/class_providers.dart';
 import '../assignment_scanner/assignment_scanner_screen.dart';
 import '../assignments/assignment_tracker_screen.dart';
+import '../bounties/note_bounties_screen.dart';
+import '../cosmetics/cosmetics_store_screen.dart';
 import '../quizzes/quiz_center_screen.dart';
 import '../vault/vault_screen.dart';
 
@@ -36,17 +39,39 @@ class HomeScreen extends ConsumerWidget {
     final allQuizzes = ref.watch(quizzesProvider);
     final subjects = ref.watch(subjectsProvider);
     final subjectMap = {for (var s in subjects) s.id: s};
+    final attendanceMap = ref.watch(attendanceProvider);
 
-    final dueTomorrowAssignments = allAssignments.where((a) {
+    int overallAttended = 0;
+    int overallTotal = 0;
+    int dangerCourses = 0;
+    for (final s in subjects) {
+      final rec = ref.read(attendanceProvider.notifier).recordFor(s.id);
+      if (rec.total > 0) {
+        overallAttended += rec.attended;
+        overallTotal += rec.total;
+        if (!rec.isSafe(s.minAttendancePct)) dangerCourses++;
+      }
+    }
+    final overallAttendancePct =
+        overallTotal == 0 ? 100.0 : (overallAttended / overallTotal) * 100.0;
+    // keep watch active
+    attendanceMap.length;
+
+    final latestAssignments = latestAssignmentsPerSubject(allAssignments);
+    final dueTomorrowAssignments = latestAssignments.where((a) {
       final isDone = completedAssignmentIds.contains(a.id);
       return !isDone && (a.isOverdue || a.isDueToday || a.isDueTomorrow);
     }).toList();
 
     final now = DateTime.now();
     final dateFormatted = DateFormat('EEEE, d MMMM').format(now);
+    final bounties = ref.watch(noteBountiesProvider);
+    final openBountiesCount = bounties.where((b) => b.isOpen).length;
+    final cosmetics = ref.watch(cosmeticsProvider);
+    final palette = context.palette;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: palette.background,
       floatingActionButton: user.isAdmin
           ? FloatingActionButton.extended(
               heroTag: null,
@@ -85,7 +110,7 @@ class HomeScreen extends ConsumerWidget {
                       children: [
                         Text(
                           dateFormatted,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.textSecondary,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -125,13 +150,13 @@ class HomeScreen extends ConsumerWidget {
                                   horizontal: 10, vertical: 5),
                               decoration: BoxDecoration(
                                 color: user.isAdmin
-                                    ? const Color(0xFFFEF3C7) // Amber tint
+                                    ? AppColors.warningBg
                                     : AppColors.primarySoft,
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
                                   color: user.isAdmin
-                                      ? AppColors.warning
-                                      : AppColors.primary.withValues(alpha: 0.2),
+                                      ? AppColors.warningBorder
+                                      : AppColors.primary.withValues(alpha: 0.25),
                                 ),
                               ),
                               child: Row(
@@ -143,7 +168,7 @@ class HomeScreen extends ConsumerWidget {
                                         : Icons.school_rounded,
                                     size: 13,
                                     color: user.isAdmin
-                                        ? AppColors.warning
+                                        ? AppColors.warningText
                                         : AppColors.primary,
                                   ),
                                   const SizedBox(width: 5),
@@ -154,7 +179,7 @@ class HomeScreen extends ConsumerWidget {
                                       fontWeight: FontWeight.w800,
                                       letterSpacing: 0.8,
                                       color: user.isAdmin
-                                          ? AppColors.warning
+                                          ? AppColors.warningText
                                           : AppColors.primary,
                                     ),
                                   ),
@@ -178,7 +203,7 @@ class HomeScreen extends ConsumerWidget {
                                       SnackBar(
                                         content: Text(res.message),
                                         backgroundColor: res.success
-                                            ? AppColors.textPrimary
+                                            ? AppColors.snackBarBg
                                             : AppColors.danger,
                                         behavior: SnackBarBehavior.floating,
                                       ),
@@ -191,20 +216,20 @@ class HomeScreen extends ConsumerWidget {
                                 horizontal: 8, vertical: 5),
                             decoration: BoxDecoration(
                               color: syncState.pendingCount > 0
-                                  ? const Color(0xFFFEF3C7)
-                                  : const Color(0xFFF0FDF4),
+                                  ? AppColors.warningBg
+                                  : AppColors.successBg,
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
                                 color: syncState.pendingCount > 0
-                                    ? const Color(0xFFFDE68A)
-                                    : const Color(0xFFBBF7D0),
+                                    ? AppColors.warningBorder
+                                    : AppColors.successBorder,
                               ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (syncState.isSyncing)
-                                  const SizedBox(
+                                  SizedBox(
                                     width: 12,
                                     height: 12,
                                     child: CircularProgressIndicator(
@@ -219,8 +244,8 @@ class HomeScreen extends ConsumerWidget {
                                         : Icons.cloud_done_rounded,
                                     size: 13,
                                     color: syncState.pendingCount > 0
-                                        ? AppColors.warning
-                                        : AppColors.success,
+                                        ? AppColors.warningText
+                                        : AppColors.successText,
                                   ),
                                 const SizedBox(width: 4),
                                 Text(
@@ -231,8 +256,8 @@ class HomeScreen extends ConsumerWidget {
                                     fontSize: 10,
                                     fontWeight: FontWeight.w800,
                                     color: syncState.pendingCount > 0
-                                        ? const Color(0xFFB45309)
-                                        : AppColors.success,
+                                        ? AppColors.warningText
+                                        : AppColors.successText,
                                   ),
                                 ),
                               ],
@@ -249,7 +274,7 @@ class HomeScreen extends ConsumerWidget {
                         Expanded(
                           child: Text(
                             '${_getGreeting()}, ${user.name.trim().isEmpty ? 'Scholar' : user.name.trim().split(' ').first}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.w800,
                               color: AppColors.textPrimary,
@@ -349,19 +374,13 @@ class HomeScreen extends ConsumerWidget {
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: palette.cardSurface,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: const Color(0xFF6366F1).withValues(alpha: 0.25),
                               width: 1.2,
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF6366F1).withValues(alpha: 0.06),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
+                            boxShadow: AppShadows.card,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -372,12 +391,12 @@ class HomeScreen extends ConsumerWidget {
                                   Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFEEF2FF),
+                                      color: AppColors.infoBg,
                                       borderRadius: BorderRadius.circular(10),
                                     ),
-                                    child: const Icon(
+                                    child: Icon(
                                       Icons.assignment_turned_in_rounded,
-                                      color: Color(0xFF4F46E5),
+                                      color: AppColors.infoText,
                                       size: 20,
                                     ),
                                   ),
@@ -385,13 +404,13 @@ class HomeScreen extends ConsumerWidget {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 7, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFEEF2FF),
+                                      color: AppColors.infoBg,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
-                                      '${allAssignments.where((a) => !completedAssignmentIds.contains(a.id)).length} Due',
-                                      style: const TextStyle(
-                                        color: Color(0xFF4F46E5),
+                                      '${latestAssignments.where((a) => !completedAssignmentIds.contains(a.id)).length} Due',
+                                      style: TextStyle(
+                                        color: AppColors.infoText,
                                         fontSize: 10,
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -400,8 +419,8 @@ class HomeScreen extends ConsumerWidget {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              const Text(
-                                'Assignments',
+                              Text(
+                                'Tasks & Alerts',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -411,8 +430,8 @@ class HomeScreen extends ConsumerWidget {
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              const Text(
-                                'Deadlines & Tasks',
+                              Text(
+                                'Assignments, Quizzes & Slides',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -441,19 +460,13 @@ class HomeScreen extends ConsumerWidget {
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: palette.cardSurface,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: const Color(0xFF10B981).withValues(alpha: 0.25),
                               width: 1.2,
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.06),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
+                            boxShadow: AppShadows.card,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,12 +477,12 @@ class HomeScreen extends ConsumerWidget {
                                   Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFECFDF5),
+                                      color: AppColors.successBg,
                                       borderRadius: BorderRadius.circular(10),
                                     ),
-                                    child: const Icon(
+                                    child: Icon(
                                       Icons.document_scanner_rounded,
-                                      color: Color(0xFF059669),
+                                      color: AppColors.successText,
                                       size: 20,
                                     ),
                                   ),
@@ -477,13 +490,13 @@ class HomeScreen extends ConsumerWidget {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 7, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFECFDF5),
+                                      color: AppColors.successBg,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
-                                    child: const Text(
+                                    child: Text(
                                       'Offline',
                                       style: TextStyle(
-                                        color: Color(0xFF059669),
+                                        color: AppColors.successText,
                                         fontSize: 10,
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -492,7 +505,7 @@ class HomeScreen extends ConsumerWidget {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              const Text(
+                              Text(
                                 'Doc Scanner',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -503,7 +516,7 @@ class HomeScreen extends ConsumerWidget {
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              const Text(
+                              Text(
                                 'Make Clean PDFs',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -541,19 +554,13 @@ class HomeScreen extends ConsumerWidget {
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: palette.cardSurface,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: AppColors.primary.withValues(alpha: 0.25),
                         width: 1.2,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.06),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      boxShadow: AppShadows.card,
                     ),
                     child: Row(
                       children: [
@@ -563,14 +570,14 @@ class HomeScreen extends ConsumerWidget {
                             color: AppColors.primarySoft,
                             borderRadius: BorderRadius.circular(11),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.psychology_alt_rounded,
                             color: AppColors.primary,
                             size: 22,
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -608,7 +615,7 @@ class HomeScreen extends ConsumerWidget {
                           ),
                           child: Text(
                             '${allQuizzes.length} Quizzes',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: AppColors.primary,
                               fontSize: 10.5,
                               fontWeight: FontWeight.w800,
@@ -616,7 +623,7 @@ class HomeScreen extends ConsumerWidget {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(
+                        Icon(
                           Icons.chevron_right_rounded,
                           color: AppColors.primary,
                           size: 20,
@@ -624,6 +631,293 @@ class HomeScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
+                ),
+              ),
+            ),
+
+            // ATTENDANCE & SAFE-BUNK CALCULATOR QUICK LAUNCHER
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: InkWell(
+                  onTap: () {
+                    ref.read(timetableSubTabProvider.notifier).setTab(2);
+                    ref.read(mainShellTabProvider.notifier).setTab(1);
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.cardSurface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: dangerCourses > 0
+                            ? AppColors.danger.withValues(alpha: 0.35)
+                            : AppColors.success.withValues(alpha: 0.28),
+                        width: 1.2,
+                      ),
+                      boxShadow: AppShadows.card,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: dangerCourses > 0
+                                ? AppColors.dangerBg
+                                : AppColors.successBgStrong,
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                          child: Icon(
+                            Icons.radar_rounded,
+                            color: dangerCourses > 0
+                                ? AppColors.dangerText
+                                : AppColors.successText,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Attendance & Safe-Bunk',
+                                style: TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                overallTotal == 0
+                                    ? 'Log Present / Absent & see how many lectures you can miss'
+                                    : dangerCourses > 0
+                                        ? '$dangerCourses course${dangerCourses == 1 ? '' : 's'} below target — tap to recover'
+                                        : 'All logged courses safe • Tap to check bunk margin',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: dangerCourses > 0
+                                      ? AppColors.danger
+                                      : AppColors.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: dangerCourses > 0
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: dangerCourses > 0
+                                ? AppColors.dangerBg
+                                : AppColors.successBgStrong,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            overallTotal == 0
+                                ? '75% Rule'
+                                : '${overallAttendancePct.toStringAsFixed(0)}%',
+                            style: TextStyle(
+                              color: dangerCourses > 0
+                                  ? AppColors.dangerText
+                                  : AppColors.successText,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: dangerCourses > 0
+                              ? AppColors.danger
+                              : AppColors.success,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // NOTE BOUNTIES + COSMETICS STORE (2-Column Quick Row)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const NoteBountiesScreen(),
+                          ),
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(13),
+                          decoration: BoxDecoration(
+                            color: palette.cardSurface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: AppColors.warning.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.warningBg,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(
+                                      Icons.volunteer_activism_rounded,
+                                      size: 18,
+                                      color: AppColors.warning,
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.warningBg,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '$openBountiesCount Open',
+                                      style: TextStyle(
+                                        color: AppColors.warningText,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Note Bounties',
+                                style: TextStyle(
+                                  color: palette.textPrimary,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                              Text(
+                                'Escrow help & earn ⚡',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: palette.textSecondary,
+                                  fontSize: 10.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CosmeticsStoreScreen(),
+                          ),
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(13),
+                          decoration: BoxDecoration(
+                            color: palette.cardSurface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: palette.primary.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: BoxDecoration(
+                                      color: palette.primarySoft,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Icon(
+                                      Icons.palette_rounded,
+                                      size: 18,
+                                      color: palette.primary,
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: palette.primarySoft,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '${user.credits} ⚡',
+                                      style: TextStyle(
+                                        color: palette.primary,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Cosmetics Store',
+                                style: TextStyle(
+                                  color: palette.textPrimary,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                              Text(
+                                cosmetics.activeTheme.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: palette.textSecondary,
+                                  fontSize: 10.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -639,7 +933,7 @@ class HomeScreen extends ConsumerWidget {
                       DateTime.now().weekday == 7
                           ? "Sunday's Schedule"
                           : "Today's Timeline",
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
@@ -650,7 +944,7 @@ class HomeScreen extends ConsumerWidget {
                       todayLectures.isEmpty
                           ? 'No Classes'
                           : '${todayLectures.length} Classes',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w600,
@@ -670,7 +964,7 @@ class HomeScreen extends ConsumerWidget {
                   child: Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: palette.cardSurface,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppColors.border),
                     ),
@@ -679,14 +973,14 @@ class HomeScreen extends ConsumerWidget {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFEF3C7),
+                            color: AppColors.warningBg,
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.wb_sunny_rounded,
-                              size: 26, color: Color(0xFFD97706)),
+                          child: Icon(Icons.wb_sunny_rounded,
+                              size: 26, color: AppColors.warning),
                         ),
                         const SizedBox(width: 14),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -834,13 +1128,13 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
       return Container(
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.palette.cardSurface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: AppColors.border),
           boxShadow: AppShadows.card,
         ),
         child: Row(
-          children: const [
+          children: [
             Icon(Icons.check_circle_outline_rounded,
                 color: AppColors.success, size: 28),
             SizedBox(width: 14),
@@ -890,7 +1184,7 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
 
     return Container(
       decoration: BoxDecoration(
-        gradient: AppColors.brandGradient,
+        gradient: context.palette.heroGradient,
         borderRadius: BorderRadius.circular(20),
         boxShadow: AppShadows.hero,
       ),
@@ -931,9 +1225,9 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
                           Container(
                             width: 6,
                             height: 6,
-                            decoration: const BoxDecoration(
+                            decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: Colors.white,
+                              color: AppColors.cardSurface,
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -1132,7 +1426,7 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
                         ),
                         style: FilledButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: AppColors.primary,
+                          foregroundColor: AppColors.secondary,
                           padding: const EdgeInsets.symmetric(vertical: 11),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -1154,7 +1448,7 @@ class _NextLectureHeroCardState extends ConsumerState<NextLectureHeroCard> {
 // TIMELINE CARD FOR EACH LECTURE TODAY
 // ===================================================================
 
-class LectureTimelineCard extends StatelessWidget {
+class LectureTimelineCard extends ConsumerWidget {
   final LectureItem item;
   final VoidCallback onReport;
 
@@ -1165,8 +1459,22 @@ class LectureTimelineCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    Theme.of(context);
     final l = item;
+    ref.watch(attendanceProvider);
+    final record =
+        ref.read(attendanceProvider.notifier).recordFor(l.subject.id);
+    final dailyMarks = ref.watch(dailyAttendanceMarksProvider);
+    final todaySlotKey = AttendanceStorage.buildSlotKey(
+      date: l.startsAt,
+      subjectId: l.subject.id,
+      slotId: l.slot.id,
+    );
+    final todayMark = dailyMarks[todaySlotKey];
+    final minPct = l.subject.minAttendancePct;
+    final attSafe = record.isSafe(minPct);
+    final margin = record.bunkAllowance(minPct);
     final isCancelled = l.isCancelled;
     final isRoomChanged = l.isRoomChanged;
     final isTimeChanged = l.isTimeChanged;
@@ -1196,14 +1504,14 @@ class LectureTimelineCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: context.palette.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isCancelled
               ? AppColors.danger.withValues(alpha: 0.4)
               : isModified
                   ? AppColors.warning.withValues(alpha: 0.45)
-                  : AppColors.border,
+                  : context.palette.border,
           width: (isCancelled || isModified) ? 1.4 : 1.0,
         ),
         boxShadow: AppShadows.card,
@@ -1240,7 +1548,7 @@ class LectureTimelineCard extends StatelessWidget {
                       if (isTimeChanged) ...[
                         Text(
                           l.slot.formattedStartTime,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.textSecondary,
                             fontSize: 11,
                             decoration: TextDecoration.lineThrough,
@@ -1254,7 +1562,7 @@ class LectureTimelineCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: isTimeChanged
-                                ? const Color(0xFFB45309)
+                                ? AppColors.warningText
                                 : AppColors.textSecondary,
                             fontSize: 13,
                             fontWeight: isTimeChanged
@@ -1307,16 +1615,16 @@ class LectureTimelineCard extends StatelessWidget {
             // Professor & Room
             Row(
               children: [
-                const Icon(Icons.person_outline_rounded,
+                Icon(Icons.person_outline_rounded,
                     size: 14, color: AppColors.textSecondary),
                 const SizedBox(width: 4),
                 Text(
                   l.subject.professor,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12, color: AppColors.textSecondary),
                 ),
                 const SizedBox(width: 12),
-                const Icon(Icons.room_outlined,
+                Icon(Icons.room_outlined,
                     size: 14, color: AppColors.textSecondary),
                 const SizedBox(width: 4),
                 Text(
@@ -1340,9 +1648,9 @@ class LectureTimelineCard extends StatelessWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: AppColors.surfaceSubtle,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  border: Border.all(color: AppColors.border),
                 ),
                 child: Text(
                   'Topic: ${l.topicCovered!}',
@@ -1384,7 +1692,96 @@ class LectureTimelineCard extends StatelessWidget {
               ),
             ],
 
-            const SizedBox(height: 14),
+            if (!isCancelled) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSubtle,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        record.total == 0
+                            ? 'Attendance: Not logged yet'
+                            : (attSafe
+                                ? '${record.percentage.toStringAsFixed(0)}% • ${margin == 0 ? "Edge ($minPct%)" : "Can miss $margin"}'
+                                : '${record.percentage.toStringAsFixed(0)}% • Need ${margin.abs()} to $minPct%'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: record.total == 0
+                              ? AppColors.textSecondary
+                              : (attSafe ? AppColors.success : AppColors.danger),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    InkWell(
+                      onTap: () => ref
+                          .read(attendanceProvider.notifier)
+                          .markPresent(l.subject.id, slotKey: todaySlotKey),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: todayMark == 'present'
+                              ? AppColors.success
+                              : AppColors.success.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          todayMark == 'present' ? 'Present ✓' : 'Present',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: todayMark == 'present'
+                                ? Colors.white
+                                : AppColors.success,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    InkWell(
+                      onTap: () => ref
+                          .read(attendanceProvider.notifier)
+                          .markAbsent(l.subject.id, slotKey: todaySlotKey),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: todayMark == 'absent'
+                              ? AppColors.danger
+                              : AppColors.danger.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          todayMark == 'absent' ? 'Absent ✗' : 'Absent',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: todayMark == 'absent'
+                                ? Colors.white
+                                : AppColors.danger,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 12),
             const Divider(),
             const SizedBox(height: 8),
 
@@ -1392,7 +1789,7 @@ class LectureTimelineCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Know of a room or schedule change?',
                     style: TextStyle(
@@ -1414,7 +1811,7 @@ class LectureTimelineCard extends StatelessWidget {
                       color: AppColors.primarySoft,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.edit_calendar_rounded,
@@ -1461,6 +1858,7 @@ class _ReportUpdateModalState extends ConsumerState<ReportUpdateModal> {
   String? _startTime;
   String? _endTime;
   DateTime? _rescheduledDate;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -1508,8 +1906,8 @@ class _ReportUpdateModalState extends ConsumerState<ReportUpdateModal> {
                     color: AppColors.primarySoft,
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: const Text(
-                    '+30 ⚡ Reward',
+                  child: Text(
+                    '+30 ⚡ on Approval',
                     style: TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w800,
@@ -1522,7 +1920,7 @@ class _ReportUpdateModalState extends ConsumerState<ReportUpdateModal> {
             const SizedBox(height: 6),
             Text(
               '${l.subject.name} (${l.slot.formattedTimeRange})',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 color: AppColors.textSecondary,
               ),
@@ -1646,41 +2044,65 @@ class _ReportUpdateModalState extends ConsumerState<ReportUpdateModal> {
             const SizedBox(height: 20),
 
             FilledButton(
-              onPressed: () {
-                final user = ref.read(currentUserProvider);
-                ref.read(dailyOverridesProvider.notifier).submitReport(
-                      slotId: l.slot.id,
-                      status: _selectedStatus,
-                      actualRoom: _roomCtrl.text.trim().isEmpty
-                          ? null
-                          : _roomCtrl.text.trim(),
-                      actualStartTime: _selectedStatus == OverrideStatus.rescheduled
-                          ? _startTime
-                          : null,
-                      actualEndTime: _selectedStatus == OverrideStatus.rescheduled
-                          ? _endTime
-                          : null,
-                      rescheduledDate: _selectedStatus == OverrideStatus.rescheduled
-                          ? _rescheduledDate
-                          : null,
-                      topicCovered: _topicCtrl.text.trim().isEmpty
-                          ? null
-                          : _topicCtrl.text.trim(),
-                      reportedBy: user.id,
-                    );
+              onPressed: _isSubmitting
+                  ? null
+                  : () async {
+                      setState(() => _isSubmitting = true);
+                      final user = ref.read(currentUserProvider);
+                      final reporterLabel = (user.rollNo != null &&
+                              user.rollNo!.trim().isNotEmpty)
+                          ? '${user.name} (${user.rollNo!.trim()})'
+                          : user.name;
+                      final err = await ref
+                          .read(dailyOverridesProvider.notifier)
+                          .submitReport(
+                            slotId: l.slot.id,
+                            status: _selectedStatus,
+                            actualRoom: _roomCtrl.text.trim().isEmpty
+                                ? null
+                                : _roomCtrl.text.trim(),
+                            actualStartTime:
+                                _selectedStatus == OverrideStatus.rescheduled
+                                    ? _startTime
+                                    : null,
+                            actualEndTime:
+                                _selectedStatus == OverrideStatus.rescheduled
+                                    ? _endTime
+                                    : null,
+                            rescheduledDate:
+                                _selectedStatus == OverrideStatus.rescheduled
+                                    ? _rescheduledDate
+                                    : null,
+                            topicCovered: _topicCtrl.text.trim().isEmpty
+                                ? null
+                                : _topicCtrl.text.trim(),
+                            reportedBy: user.id,
+                            reportedByName: reporterLabel,
+                          );
 
-                // Reward student +30 credits
-                ref.read(currentUserProvider.notifier).addCredits(30);
+                      if (!context.mounted) return;
+                      setState(() => _isSubmitting = false);
+                      if (err != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(err),
+                            backgroundColor: AppColors.danger,
+                          ),
+                        );
+                        return;
+                      }
 
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                        'Report submitted to Mod Queue! +30 ⚡ added to your credits.'),
-                  ),
-                );
-              },
-              child: const Text('Submit Report (+30 ⚡)'),
+                      Navigator.of(context).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Request submitted to Admin Queue! You will earn +30 ⚡ once approved.'),
+                        ),
+                      );
+                    },
+              child: Text(_isSubmitting
+                  ? 'Submitting...'
+                  : 'Submit Request for Review'),
             ),
           ],
         ),
@@ -1693,14 +2115,44 @@ class _ReportUpdateModalState extends ConsumerState<ReportUpdateModal> {
 // LIVE MEETING / LECTURE ALARM PANEL (SHOWN ON HOME SCREEN)
 // ===================================================================
 
-class _ActiveMeetingAlarmPanel extends StatelessWidget {
+class _ActiveMeetingAlarmPanel extends ConsumerWidget {
   final ActiveLectureAlarm alarm;
 
   const _ActiveMeetingAlarmPanel({required this.alarm});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isRinging = alarm.isRinging;
+    final subjects = ref.watch(subjectsProvider);
+    final subject = resolveSubjectById(subjects, alarm.subjectId);
+    final minPct = subject?.minAttendancePct ?? 75;
+    final slotKey = AttendanceStorage.buildSlotKey(
+      date: alarm.startsAt,
+      subjectId: alarm.subjectId,
+      slotId: alarm.slotId,
+    );
+
+    void logFromAlarm(bool isPresent) {
+      if (alarm.subjectId.isEmpty) return;
+      final notifier = ref.read(attendanceProvider.notifier);
+      if (isPresent) {
+        notifier.markPresent(alarm.subjectId, slotKey: slotKey);
+      } else {
+        notifier.markAbsent(alarm.subjectId, slotKey: slotKey);
+      }
+      final updated = notifier.recordFor(alarm.subjectId);
+      AlertScheduler.instance.stopActiveAlarm(dismissPanel: true);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${isPresent ? "Marked Present ✓" : "Marked Absent ✗"} • ${updated.statusSummary(alarm.subjectName, minPct)}',
+          ),
+          backgroundColor:
+              updated.isSafe(minPct) ? AppColors.success : AppColors.danger,
+        ),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -1869,6 +2321,48 @@ class _ActiveMeetingAlarmPanel extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => logFromAlarm(true),
+                  icon: const Icon(Icons.check_circle_rounded, size: 17),
+                  label: const Text(
+                    'Mark Present ✓',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => logFromAlarm(false),
+                  icon: const Icon(Icons.cancel_rounded, size: 17),
+                  label: const Text(
+                    'Mark Absent ✗',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.black.withValues(alpha: 0.35),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
               if (isRinging) ...[
                 Expanded(
                   child: FilledButton.icon(
@@ -1943,6 +2437,7 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    Theme.of(context);
     if (assignments.isEmpty) return const SizedBox.shrink();
     final subjects = subjectMap.values.toList();
     final hasOverdueOrToday =
@@ -1951,16 +2446,13 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFFFFBEB), // Warm amber background
+        color: AppColors.urgentBg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFF59E0B), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(
+          color: AppColors.warning.withValues(alpha: AppColors.isDark ? 0.5 : 0.9),
+          width: 1.5,
+        ),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1991,8 +2483,8 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                         children: [
                           Text(
                             headerText,
-                            style: const TextStyle(
-                              color: Color(0xFFB45309),
+                            style: TextStyle(
+                              color: AppColors.warningText,
                               fontWeight: FontWeight.w900,
                               fontSize: 12,
                               letterSpacing: 0.8,
@@ -2018,10 +2510,10 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                         ],
                       ),
                       const SizedBox(height: 2),
-                      const Text(
-                        'Tap Scan PDF to prepare submission or check off when done',
+                      Text(
+                        'Assignments, quizzes & presentations — check off when done',
                         style: TextStyle(
-                          color: Color(0xFF92400E),
+                          color: AppColors.warningTextDeep,
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
                         ),
@@ -2041,26 +2533,26 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         'View All',
                         style: TextStyle(
-                          color: Color(0xFFB45309),
+                          color: AppColors.warningText,
                           fontWeight: FontWeight.w800,
                           fontSize: 12,
                         ),
                       ),
                       Icon(Icons.chevron_right_rounded,
-                          size: 16, color: Color(0xFFB45309)),
+                          size: 16, color: AppColors.warningText),
                     ],
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1, color: Color(0xFFFDE68A)),
+          Divider(height: 1, color: AppColors.warningBorder),
 
           // List of urgent assignments
           ListView.separated(
@@ -2081,9 +2573,9 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
               return Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.cardSurface,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFFDE68A)),
+                  border: Border.all(color: AppColors.warningBorder),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2109,10 +2601,10 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                         width: 26,
                         height: 26,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: AppColors.cardSurface,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                              color: const Color(0xFFD97706), width: 1.8),
+                              color: AppColors.warning, width: 1.8),
                         ),
                         child: const Icon(Icons.check,
                             size: 16, color: Colors.transparent),
@@ -2140,20 +2632,45 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                                   ),
                                   child: Text(
                                     subject?.code ?? 'CLASS',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: AppColors.primary,
                                       fontWeight: FontWeight.w800,
                                       fontSize: 10,
                                     ),
                                   ),
                                 ),
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: a.category == TaskCategory.quiz
+                                        ? AppColors.warningBg
+                                        : (a.category == TaskCategory.presentation
+                                            ? AppColors.infoBg
+                                            : AppColors.surfaceMuted),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    '${a.category.emoji} ${a.category.label.toUpperCase()}',
+                                    style: TextStyle(
+                                      color: a.category == TaskCategory.quiz
+                                          ? AppColors.warningText
+                                          : (a.category == TaskCategory.presentation
+                                              ? AppColors.infoText
+                                              : AppColors.textSecondary),
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 9,
+                                    ),
+                                  ),
+                                ),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    subject?.name ?? 'Course Assignment',
+                                    subject?.name ?? a.category.label,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: AppColors.textSecondary,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
@@ -2164,13 +2681,13 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFFEE2E2),
+                                    color: AppColors.dangerBgStrong,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
                                     badgeLabel,
-                                    style: const TextStyle(
-                                      color: Color(0xFFDC2626),
+                                    style: TextStyle(
+                                      color: AppColors.dangerText,
                                       fontSize: 9,
                                       fontWeight: FontWeight.w800,
                                     ),
@@ -2181,7 +2698,7 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                             const SizedBox(height: 5),
                             Text(
                               a.title,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 13,
                                 color: AppColors.textPrimary,
@@ -2193,7 +2710,7 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                                 a.description,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   color: AppColors.textSecondary,
                                 ),
@@ -2202,54 +2719,55 @@ class UrgentAssignmentsBanner extends ConsumerWidget {
                             const SizedBox(height: 6),
                             Row(
                               children: [
-                                const Icon(Icons.schedule_rounded,
-                                    size: 12, color: Color(0xFFB45309)),
+                                Icon(Icons.schedule_rounded,
+                                    size: 12, color: AppColors.warningText),
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
                                     a.formattedDeadline,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFFB45309),
+                                      color: AppColors.warningText,
                                     ),
                                   ),
                                 ),
-                                InkWell(
-                                  onTap: () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => AssignmentScannerScreen(
-                                        initialAssignment: a,
+                                if (a.category == TaskCategory.assignment)
+                                  InkWell(
+                                    onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => AssignmentScannerScreen(
+                                          initialAssignment: a,
+                                        ),
+                                      ),
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primarySoft,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.document_scanner_rounded,
+                                              size: 11, color: AppColors.primary),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Scan PDF',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w800,
+                                              color: AppColors.primary,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primarySoft,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: const Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.document_scanner_rounded,
-                                            size: 11, color: AppColors.primary),
-                                        SizedBox(width: 4),
-                                        Text(
-                                          'Scan PDF',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
-                                            color: AppColors.primary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
                               ],
                             ),
                           ],

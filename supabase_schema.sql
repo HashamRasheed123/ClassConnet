@@ -24,6 +24,15 @@ create table if not exists public.users (
 -- Ensure existing users table has new columns when migrating
 alter table public.users add column if not exists roll_no text;
 alter table public.users add column if not exists can_upload boolean not null default false;
+alter table public.users add column if not exists unlocked_cosmetics jsonb not null default '[]'::jsonb;
+
+create table if not exists public.quiz_credit_claims (
+  user_id uuid not null references public.users(id) on delete cascade,
+  quiz_id text not null,
+  best_score integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, quiz_id)
+);
 
 -- 2. SUBJECTS TABLE
 create table if not exists public.subjects (
@@ -64,10 +73,15 @@ create table if not exists public.daily_overrides (
   unique (slot_id, date)
 );
 
--- Ensure existing daily_overrides table has time & date shift columns when migrating
+-- Ensure existing daily_overrides table has time, date shift, and audit columns when migrating
 alter table public.daily_overrides add column if not exists actual_start_time time;
 alter table public.daily_overrides add column if not exists actual_end_time time;
 alter table public.daily_overrides add column if not exists rescheduled_date date;
+alter table public.daily_overrides add column if not exists meeting_url text;
+alter table public.daily_overrides add column if not exists reported_by_name text;
+alter table public.daily_overrides add column if not exists credits_awarded boolean not null default false;
+alter table public.daily_overrides add column if not exists reviewed_by uuid references public.users(id) on delete set null;
+alter table public.daily_overrides add column if not exists reviewed_at timestamptz;
 
 -- 5. RESOURCES (VAULT) TABLE
 create table if not exists public.resources (
@@ -77,7 +91,7 @@ create table if not exists public.resources (
   uploader_id uuid references public.users(id) on delete set null,
   uploader_name text not null,
   title text not null,
-  type text not null check (type in ('pdf', 'image', 'youtube')),
+  type text not null check (type in ('notes', 'pdf', 'folder', 'image', 'youtube')),
   url text not null,
   upvotes integer not null default 0,
   cost_credits integer not null default 5,
@@ -212,11 +226,15 @@ create table if not exists public.assignments (
   subject_id uuid references public.subjects(id) on delete cascade,
   title text not null,
   description text default '',
+  category text not null default 'assignment',
   deadline timestamptz not null,
   drive_url text,
   created_by text default 'Admin',
   created_at timestamptz not null default now()
 );
+
+alter table public.assignments
+  add column if not exists category text not null default 'assignment';
 
 alter table public.assignments enable row level security;
 
@@ -261,8 +279,45 @@ create policy "Allow admins to manage quizzes"
   with check (true);
 
 
+-- 9. STUDENT VERIFICATION REQUESTS & NOTE BOUNTIES (See supabase_security_fix.sql for full triggers/RPCs)
+create table if not exists public.student_verification_requests (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references public.users(id) on delete cascade,
+  email text not null,
+  name text not null,
+  roll_no text not null,
+  status text not null check (status in ('pending', 'approved', 'rejected')) default 'pending',
+  rejection_reason text,
+  reviewed_by text,
+  reviewed_at timestamptz,
+  submitted_at timestamptz not null default now()
+);
+
+create table if not exists public.note_bounties (
+  id uuid primary key default uuid_generate_v4(),
+  subject_id uuid references public.subjects(id) on delete set null,
+  title text not null,
+  description text not null default '',
+  reward_credits integer not null check (reward_credits between 10 and 200),
+  requester_id uuid references public.users(id) on delete cascade,
+  requester_name text not null,
+  requester_roll_no text,
+  status text not null check (status in ('open', 'submitted', 'disputed', 'completed', 'cancelled')) default 'open',
+  helper_id uuid references public.users(id) on delete set null,
+  helper_name text,
+  helper_roll_no text,
+  solution_text text,
+  solution_url text,
+  dispute_reason text,
+  payout_released boolean not null default false,
+  submitted_at timestamptz,
+  resolved_at timestamptz,
+  resolved_by text,
+  created_at timestamptz not null default now()
+);
+
 -- ===================================================================
--- 8. STORAGE BUCKET SETUP (Vault - Lecture Notes & Attachments)
+-- 10. STORAGE BUCKET SETUP (Vault - Lecture Notes & Attachments)
 -- ===================================================================
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

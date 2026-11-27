@@ -81,17 +81,17 @@ Future<bool> showAdminPasscodeDialog(
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFEF3C7),
+                  color: AppColors.warningBg,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.admin_panel_settings_rounded,
-                  color: Color(0xFFD97706),
+                  color: AppColors.warning,
                   size: 24,
                 ),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -103,12 +103,12 @@ Future<bool> showAdminPasscodeDialog(
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       'Admin Password Required',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF92400E),
+                        color: AppColors.warningTextDeep,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -126,14 +126,14 @@ Future<bool> showAdminPasscodeDialog(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
+                  color: AppColors.surfaceSubtle,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.border),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.verified_user_rounded,
-                        size: 18, color: Color(0xFF059669)),
+                    Icon(Icons.verified_user_rounded,
+                        size: 18, color: AppColors.successText),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -141,7 +141,7 @@ Future<bool> showAdminPasscodeDialog(
                         children: [
                           Text(
                             currentUser.name,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
                               color: AppColors.textPrimary,
@@ -151,7 +151,7 @@ Future<bool> showAdminPasscodeDialog(
                           ),
                           Text(
                             currentUser.email,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
                               color: AppColors.textSecondary,
                             ),
@@ -163,15 +163,15 @@ Future<bool> showAdminPasscodeDialog(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFD1FAE5),
+                        color: AppColors.successBgStrong,
                         borderRadius: BorderRadius.circular(999),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Verified Admin',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF059669),
+                          color: AppColors.successText,
                         ),
                       ),
                     ),
@@ -181,7 +181,7 @@ Future<bool> showAdminPasscodeDialog(
 
               const SizedBox(height: 14),
 
-              const Text(
+              Text(
                 'Enter the administrator password to unlock console privileges:',
                 style: TextStyle(
                   fontSize: 12,
@@ -203,7 +203,7 @@ Future<bool> showAdminPasscodeDialog(
                 decoration: InputDecoration(
                   hintText: 'Enter Admin Password',
                   hintStyle:
-                      const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                      TextStyle(fontSize: 13, color: AppColors.textSecondary),
                   prefixIcon: const Icon(Icons.key_rounded, size: 20),
                   suffixIcon: IconButton(
                     icon: Icon(
@@ -217,19 +217,19 @@ Future<bool> showAdminPasscodeDialog(
                   ),
                   errorText: errorText,
                   filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
+                  fillColor: AppColors.surfaceSubtle,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.border),
+                    borderSide: BorderSide(color: AppColors.border),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.border),
+                    borderSide: BorderSide(color: AppColors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide:
-                        const BorderSide(color: AppColors.primary, width: 1.5),
+                        BorderSide(color: AppColors.primary, width: 1.5),
                   ),
                 ),
                 onSubmitted: (_) => submit(),
@@ -240,7 +240,7 @@ Future<bool> showAdminPasscodeDialog(
             TextButton(
               onPressed:
                   isChecking ? null : () => Navigator.of(ctx).pop(false),
-              child: const Text(
+              child: Text(
                 'Cancel',
                 style: TextStyle(color: AppColors.textSecondary),
               ),

@@ -1,15 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import '../../models/models.dart';
+import '../theme/app_theme.dart';
 import '../utils/formatters.dart';
 import '../utils/uuid_util.dart';
+import 'app_sound_service.dart';
+import 'attendance_storage.dart';
 
 enum AlertMode {
   ring('Ring', '🔔'),
@@ -132,13 +137,49 @@ class ActiveLectureAlarm {
   }
 }
 
-/// Background handler for notification action buttons (e.g. "Stop").
+/// Handles attendance & alarm action buttons from local lecture notifications.
+Future<void> handleAttendanceNotificationAction(
+  NotificationResponse response, {
+  bool isBackground = false,
+}) async {
+  final actionId = response.actionId;
+  if (actionId == 'mark_present' || actionId == 'mark_absent') {
+    if (isBackground) {
+      try {
+        WidgetsFlutterBinding.ensureInitialized();
+        DartPluginRegistrant.ensureInitialized();
+      } catch (_) {}
+    }
+    final parsed = ActiveLectureAlarm.fromPayloadString(response.payload);
+    if (parsed != null && parsed.subjectId.isNotEmpty) {
+      final slotKey = AttendanceStorage.buildSlotKey(
+        date: parsed.startsAt,
+        subjectId: parsed.subjectId,
+        slotId: parsed.slotId,
+      );
+      await AttendanceStorage.recordFromNotification(
+        subjectId: parsed.subjectId,
+        isPresent: actionId == 'mark_present',
+        slotKey: slotKey,
+      );
+    }
+    await AlertScheduler.instance.stopActiveAlarm(dismissPanel: true);
+    if (!isBackground) {
+      AlertScheduler.instance.attendanceSyncVersion.value++;
+    }
+    return;
+  }
+  if (actionId == 'stop_alarm') {
+    await AlertScheduler.instance.stopActiveAlarm();
+  }
+}
+
+/// Background handler for notification action buttons (e.g. "Stop", "Present", "Absent").
 /// Must be a top-level function so Android can invoke it while the app is killed.
 @pragma('vm:entry-point')
-void alarmNotificationBackgroundHandler(NotificationResponse response) {
-  if (response.actionId == 'stop_alarm') {
-    AlertScheduler.instance.stopActiveAlarm();
-  }
+Future<void> alarmNotificationBackgroundHandler(
+    NotificationResponse response) async {
+  await handleAttendanceNotificationAction(response, isBackground: true);
 }
 
 /// Real alarm-clock style lecture alerts with native audio stream playback
@@ -150,6 +191,8 @@ class AlertScheduler {
   static const String _prefAlertModeKey = 'kzynovex_alert_mode';
   static const String _prefLeadTimeKey = 'kzynovex_alert_lead_time_mins';
   static const String _prefBatteryPromptKey = 'kzynovex_battery_opt_prompted_v1';
+  static const String _prefAlarmSoundKey = 'kzynovex_alarm_sound_preset_v1';
+  static const String _prefNotifSoundKey = 'kzynovex_notif_sound_preset_v1';
 
   static const MethodChannel _powerChannel =
       MethodChannel('classconnect/alarm_power');
@@ -162,17 +205,48 @@ class AlertScheduler {
   final ValueNotifier<ActiveLectureAlarm?> activeAlarmNotifier =
       ValueNotifier<ActiveLectureAlarm?>(null);
 
-  // v4 channels: fresh IDs ensure Android recreates channels with alarm sound attributes.
-  static const String channelRingId = 'lecture_alarm_ring_v4';
+  /// Incremented whenever foreground notification attendance action updates storage.
+  final ValueNotifier<int> attendanceSyncVersion = ValueNotifier<int>(0);
+
+  // v5 / v2 channels: separate per-preset channels so Android plays the chosen bundled audio.
+  static const String channelRingId = 'lecture_alarm_ring_classic_v5';
   static const String channelVibrateId = 'lecture_alarm_vibrate_v4';
   static const String channelSilentId = 'class_alerts_silent_v2';
-  static const String channelAssignmentId = 'assignment_reminders_v1';
+  static const String channelAssignmentId = 'assignment_reminders_bubble_pop_v2';
+
+  static String ringChannelIdFor(String presetId) {
+    final preset = AlarmSoundPreset.fromId(presetId);
+    switch (preset) {
+      case AlarmSoundPreset.oversimplifiedAlarm:
+        return 'lecture_alarm_ring_oversimplified_v5';
+      case AlarmSoundPreset.dreamcoreAlarm:
+        return 'lecture_alarm_ring_dreamcore_v5';
+      case AlarmSoundPreset.chiptuneAlarm:
+        return 'lecture_alarm_ring_chiptune_v5';
+      case AlarmSoundPreset.classicAlarm:
+        return channelRingId;
+    }
+  }
+
+  static String assignmentChannelIdFor(String presetId) {
+    final preset = NotificationSoundPreset.fromId(presetId);
+    switch (preset) {
+      case NotificationSoundPreset.bubblePop:
+        return 'assignment_reminders_bubble_pop_v2';
+      case NotificationSoundPreset.interfaceChime:
+        return 'assignment_reminders_interface_chime_v2';
+      case NotificationSoundPreset.systemDefault:
+        return 'assignment_reminders_default_v2';
+    }
+  }
 
   static const List<String> _legacyChannelIds = [
     'class_alerts_ring_v2',
     'class_alerts_vibrate_v2',
     'lecture_alarm_ring_v3',
     'lecture_alarm_vibrate_v3',
+    'lecture_alarm_ring_v4',
+    'assignment_reminders_v1',
   ];
 
   /// System default alarm ringtone (same sound as the Clock app).
@@ -251,18 +325,24 @@ class AlertScheduler {
         } catch (_) {}
       }
 
-      // 1. Ring channel: real alarm ringtone on the ALARM stream.
-      final ringChannel = AndroidNotificationChannel(
-        channelRingId,
-        'Lecture Alarms (Ring)',
-        description: 'Rings like an alarm clock before each lecture.',
-        importance: Importance.max,
-        playSound: true,
-        sound: const UriAndroidNotificationSound(_alarmSoundUri),
-        enableVibration: true,
-        vibrationPattern: _ringPattern,
-        audioAttributesUsage: AudioAttributesUsage.alarm,
-      );
+      // 1. Ring channels: per-preset alarm channels on the ALARM audio stream.
+      for (final preset in AlarmSoundPreset.values) {
+        final AndroidNotificationSound sound = preset.rawResName != null
+            ? RawResourceAndroidNotificationSound(preset.rawResName!)
+            : const UriAndroidNotificationSound(_alarmSoundUri);
+        final ringChannel = AndroidNotificationChannel(
+          ringChannelIdFor(preset.id),
+          'Lecture Alarms (${preset.name})',
+          description: 'Rings like an alarm clock before each lecture.',
+          importance: Importance.max,
+          playSound: true,
+          sound: sound,
+          enableVibration: true,
+          vibrationPattern: _ringPattern,
+          audioAttributesUsage: AudioAttributesUsage.alarm,
+        );
+        await androidPlugin.createNotificationChannel(ringChannel);
+      }
 
       // 2. Vibrate channel: haptics only.
       final vibrateChannel = AndroidNotificationChannel(
@@ -285,20 +365,24 @@ class AlertScheduler {
         enableVibration: false,
       );
 
-      // 4. Assignment reminders (normal notification sound)
-      const assignmentChannel = AndroidNotificationChannel(
-        channelAssignmentId,
-        'Assignment Deadlines',
-        description: 'Reminders before admin-posted assignment deadlines.',
-        importance: Importance.high,
-        playSound: true,
-        enableVibration: true,
-      );
+      // 4. Assignment & reminder channels: per-preset notification sounds.
+      for (final notifPreset in NotificationSoundPreset.values) {
+        final assignmentChannel = AndroidNotificationChannel(
+          assignmentChannelIdFor(notifPreset.id),
+          'Assignments & Alerts (${notifPreset.name})',
+          description: 'Reminders for assignments, upcoming quizzes & presentations.',
+          importance: Importance.high,
+          playSound: true,
+          sound: notifPreset.rawResName != null
+              ? RawResourceAndroidNotificationSound(notifPreset.rawResName!)
+              : null,
+          enableVibration: true,
+        );
+        await androidPlugin.createNotificationChannel(assignmentChannel);
+      }
 
-      await androidPlugin.createNotificationChannel(ringChannel);
       await androidPlugin.createNotificationChannel(vibrateChannel);
       await androidPlugin.createNotificationChannel(silentChannel);
-      await androidPlugin.createNotificationChannel(assignmentChannel);
 
       try {
         _canScheduleExact =
@@ -309,11 +393,13 @@ class AlertScheduler {
     _isInitialized = true;
   }
 
-  void _handleNotificationResponse(NotificationResponse response) {
+  Future<void> _handleNotificationResponse(NotificationResponse response) async {
     debugPrint(
         'Notification response: action=${response.actionId}, payload=${response.payload}');
-    if (response.actionId == 'stop_alarm') {
-      stopActiveAlarm();
+    if (response.actionId == 'stop_alarm' ||
+        response.actionId == 'mark_present' ||
+        response.actionId == 'mark_absent') {
+      await handleAttendanceNotificationAction(response, isBackground: false);
       return;
     }
     final parsed = ActiveLectureAlarm.fromPayloadString(response.payload);
@@ -377,13 +463,35 @@ class AlertScheduler {
   Future<void> _startNativeAlarm(AlertMode mode) async {
     if (mode == AlertMode.silent) return;
     try {
+      final soundPreset = await getSavedAlarmSoundPreset();
       await _powerChannel.invokeMethod('startAlarmRinging', {
         'playSound': mode == AlertMode.ring,
         'vibrate': true,
+        'soundPreset': soundPreset,
+        'previewOnly': false,
       });
     } catch (e) {
       debugPrint('Native alarm start skipped: $e');
     }
+  }
+
+  /// Plays a 3.5-second preview of the given alarm sound preset from the Cosmetics Store.
+  Future<void> previewAlarmSound(String soundPresetId) async {
+    try {
+      await _powerChannel.invokeMethod('startAlarmRinging', {
+        'playSound': true,
+        'vibrate': true,
+        'soundPreset': soundPresetId,
+        'previewOnly': true,
+      });
+    } catch (e) {
+      debugPrint('Alarm sound preview skipped: $e');
+    }
+  }
+
+  /// Plays a preview of a bundled or system notification sound preset.
+  Future<void> previewNotificationSound(String soundPresetId) async {
+    await AppSoundService.instance.previewNotificationSound(soundPresetId);
   }
 
   Future<void> _stopNativeAudioOnly() async {
@@ -419,7 +527,8 @@ class AlertScheduler {
     await _startNativeAlarm(alarm.mode);
 
     if (alarm.mode != AlertMode.silent) {
-      final details = _alarmDetails(alarm.mode);
+      final soundPreset = await getSavedAlarmSoundPreset();
+      final details = _alarmDetails(alarm.mode, soundPreset: soundPreset);
       final title = customTitle ??
           '⏰ ${alarm.subjectName} (${alarm.subjectCode})';
       final body = customBody ??
@@ -530,20 +639,53 @@ class AlertScheduler {
     await prefs.setInt(_prefLeadTimeKey, minutes);
   }
 
+  Future<String> getSavedAlarmSoundPreset() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_prefAlarmSoundKey) ?? 'classic_alarm';
+  }
+
+  Future<void> saveAlarmSoundPreset(String presetId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefAlarmSoundKey, presetId);
+  }
+
+  Future<String> getSavedNotificationSoundPreset() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_prefNotifSoundKey) ??
+        NotificationSoundPreset.bubblePop.id;
+  }
+
+  Future<void> saveNotificationSoundPreset(String presetId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefNotifSoundKey, presetId);
+  }
+
   // ---------------------------------------------------------------------------
   // NOTIFICATION DETAILS
   // ---------------------------------------------------------------------------
 
-  NotificationDetails _alarmDetails(AlertMode mode) {
+  NotificationDetails _alarmDetails(
+    AlertMode mode, {
+    String soundPreset = 'classic_alarm',
+  }) {
     final isRing = mode == AlertMode.ring;
+    final preset = AlarmSoundPreset.fromId(soundPreset);
+    final AndroidNotificationSound? ringSound = !isRing
+        ? null
+        : (preset.rawResName != null
+            ? RawResourceAndroidNotificationSound(preset.rawResName!)
+            : const UriAndroidNotificationSound(_alarmSoundUri));
+
     final android = AndroidNotificationDetails(
-      isRing ? channelRingId : channelVibrateId,
-      isRing ? 'Lecture Alarms (Ring)' : 'Lecture Alarms (Vibrate)',
+      isRing ? ringChannelIdFor(preset.id) : channelVibrateId,
+      isRing
+          ? 'Lecture Alarms (${preset.name})'
+          : 'Lecture Alarms (Vibrate)',
       channelDescription: 'Alarm-clock style alerts before lectures begin',
       importance: Importance.max,
       priority: Priority.max,
       playSound: isRing,
-      sound: isRing ? const UriAndroidNotificationSound(_alarmSoundUri) : null,
+      sound: ringSound,
       enableVibration: true,
       vibrationPattern: isRing ? _ringPattern : _vibratePattern,
       audioAttributesUsage: isRing
@@ -563,23 +705,42 @@ class AlertScheduler {
           cancelNotification: true,
           showsUserInterface: true,
         ),
+        AndroidNotificationAction(
+          'mark_present',
+          'Present ✓',
+          cancelNotification: true,
+          showsUserInterface: false,
+        ),
+        AndroidNotificationAction(
+          'mark_absent',
+          'Absent ✗',
+          cancelNotification: true,
+          showsUserInterface: false,
+        ),
       ],
     );
     return NotificationDetails(android: android);
   }
 
-  NotificationDetails get _assignmentDetails => const NotificationDetails(
-        android: AndroidNotificationDetails(
-          channelAssignmentId,
-          'Assignment Deadlines',
-          channelDescription:
-              'Reminders before admin-posted assignment deadlines.',
-          importance: Importance.high,
-          priority: Priority.high,
-          category: AndroidNotificationCategory.reminder,
-          visibility: NotificationVisibility.public,
-        ),
-      );
+  NotificationDetails _assignmentDetailsFor(String notifSoundPresetId) {
+    final preset = NotificationSoundPreset.fromId(notifSoundPresetId);
+    return NotificationDetails(
+      android: AndroidNotificationDetails(
+        assignmentChannelIdFor(preset.id),
+        'Assignments & Alerts (${preset.name})',
+        channelDescription:
+            'Reminders before admin-posted assignment deadlines.',
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+        sound: preset.rawResName != null
+            ? RawResourceAndroidNotificationSound(preset.rawResName!)
+            : null,
+        category: AndroidNotificationCategory.reminder,
+        visibility: NotificationVisibility.public,
+      ),
+    );
+  }
 
   AndroidScheduleMode get _scheduleMode => _canScheduleExact
       ? AndroidScheduleMode.alarmClock
@@ -854,6 +1015,8 @@ class AlertScheduler {
 
     _clearForegroundTimers();
     final leadTime = leadTimeMinutes ?? await getSavedLeadTimeMinutes();
+    final alarmSoundPreset = await getSavedAlarmSoundPreset();
+    final notifSoundPreset = await getSavedNotificationSoundPreset();
     await _cancelScheduled();
 
     final now = DateTime.now();
@@ -861,7 +1024,7 @@ class AlertScheduler {
 
     // ---- Lecture alarms ----
     if (mode != AlertMode.silent && slots.isNotEmpty) {
-      final details = _alarmDetails(mode);
+      final details = _alarmDetails(mode, soundPreset: alarmSoundPreset);
       final occurrences =
           _buildOccurrences(slots: slots, overrides: overrides);
 
@@ -992,8 +1155,9 @@ class AlertScheduler {
           'AlertScheduler: silent mode or no slots, lecture alarms cleared.');
     }
 
-    // ---- Assignment deadline reminders (independent of ring mode) ----
+    // ---- Assignment, Quiz & Presentation reminders (independent of ring mode) ----
     int aIndex = 0;
+    final assignmentDetails = _assignmentDetailsFor(notifSoundPreset);
     final pending = assignments
         .where((a) =>
             !completedAssignmentIds.contains(a.id) && a.deadline.isAfter(now))
@@ -1001,29 +1165,53 @@ class AlertScheduler {
       ..sort((a, b) => a.deadline.compareTo(b.deadline));
     for (final a in pending) {
       final subjectCode =
-          _lookupSubject(subjectMap, a.subjectId)?.code ?? 'Assignment';
+          _lookupSubject(subjectMap, a.subjectId)?.code ?? a.category.label;
       final reminders = <Duration, String>{
-        const Duration(hours: 24): 'due tomorrow',
-        const Duration(hours: 2): 'due in 2 hours',
+        const Duration(hours: 24): 'tomorrow',
+        const Duration(hours: 2): 'in 2 hours',
       };
       for (final entry in reminders.entries) {
         if (aIndex >= _maxAssignmentReminders) break;
         final at = a.deadline.toLocal().subtract(entry.key);
         if (!at.isAfter(now)) continue;
+
+        final String notifTitle;
+        final String notifBody;
+        switch (a.category) {
+          case TaskCategory.assignment:
+            final dueWord = entry.key == const Duration(hours: 24)
+                ? 'due tomorrow'
+                : 'due in 2 hours';
+            notifTitle = '📝 $subjectCode Assignment: ${a.title} $dueWord';
+            notifBody =
+                'Deadline ${a.formattedDeadline}. Mark it done in Tasks once submitted.';
+            break;
+          case TaskCategory.quiz:
+            notifTitle = '🧠 $subjectCode Quiz: ${a.title} ${entry.value}';
+            notifBody =
+                'Upcoming quiz at ${a.formattedDeadline}. Review your notes in Academic Vault!';
+            break;
+          case TaskCategory.presentation:
+            notifTitle =
+                '🎤 $subjectCode Presentation: ${a.title} ${entry.value}';
+            notifBody =
+                'Scheduled for ${a.formattedDeadline}. Finalize your slides & talking points!';
+            break;
+        }
+
         try {
           await _notificationsPlugin.zonedSchedule(
             id: _assignmentIdBase + aIndex,
-            title: '📝 $subjectCode: ${a.title} ${entry.value}',
-            body:
-                'Deadline ${a.formattedDeadline}. Mark it done in Tasks once submitted.',
+            title: notifTitle,
+            body: notifBody,
             scheduledDate: tz.TZDateTime.from(at, _safeLocation),
-            notificationDetails: _assignmentDetails,
+            notificationDetails: assignmentDetails,
             androidScheduleMode: _scheduleMode,
             payload: 'assignment:${a.id}',
           );
           aIndex++;
         } catch (e) {
-          debugPrint('Error scheduling assignment reminder: $e');
+          debugPrint('Error scheduling ${a.category.name} reminder: $e');
         }
       }
     }
@@ -1122,7 +1310,8 @@ class AlertScheduler {
       return;
     }
 
-    final details = _alarmDetails(effectiveMode);
+    final alarmSoundPreset = await getSavedAlarmSoundPreset();
+    final details = _alarmDetails(effectiveMode, soundPreset: alarmSoundPreset);
     final title = effectiveMode == AlertMode.ring
         ? '⏰ ${alarm.subjectName} (Ring)'
         : '📳 ${alarm.subjectName} (Vibrate)';

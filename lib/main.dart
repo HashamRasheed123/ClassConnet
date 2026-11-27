@@ -5,10 +5,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/config/app_config.dart';
 import 'core/constants/kzynovex_branding.dart';
 import 'core/services/alert_scheduler.dart';
+import 'core/services/app_sound_service.dart';
 import 'core/services/auth_service.dart';
 import 'core/services/offline_document_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/splash/splash_screen.dart';
+import 'providers/class_providers.dart';
 import 'repositories/class_repository.dart';
 
 Future<void> main() async {
@@ -19,6 +21,12 @@ Future<void> main() async {
 
   // Initialize background services and preload local caches concurrently so startup is ultra-fast
   await Future.wait([
+    CosmeticsNotifier.preloadSavedTheme().catchError((e) {
+      debugPrint('Theme preload skipped: $e');
+    }),
+    AppSoundService.instance.loadPrefs().catchError((e) {
+      debugPrint('Sound prefs preload skipped: $e');
+    }),
     AuthService.instance.getActiveSession().catchError((e) {
       debugPrint('AuthSession preload skipped: $e');
       return null;
@@ -42,6 +50,10 @@ Future<void> main() async {
         debugPrint('Supabase init skipped/error: $e');
       }),
   ]);
+
+  SystemChrome.setSystemUIOverlayStyle(
+    AppTheme.overlayStyleFor(CosmeticsNotifier.initialTheme),
+  );
 
   // Global error handler so any route or widget crash displays a styled diagnostic
   // error view with stack trace and Go Back button instead of a silent blank white screen.
@@ -128,15 +140,28 @@ Future<void> main() async {
   );
 }
 
-class ClassConnectApp extends StatelessWidget {
+class ClassConnectApp extends ConsumerWidget {
   const ClassConnectApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cosmetics = ref.watch(cosmeticsProvider);
+    final palette = AppThemePalette.forPreset(cosmetics.activeTheme);
+    AppColors.applyPalette(palette);
+    final themeData = AppTheme.forPreset(cosmetics.activeTheme);
+    final overlayStyle = AppTheme.overlayStyleFor(cosmetics.activeTheme);
+    SystemChrome.setSystemUIOverlayStyle(overlayStyle);
+
     return MaterialApp(
       title: KzynovexBranding.appName,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
+      theme: themeData,
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: GlobalButtonSoundLayer(
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
       home: const SplashScreen(),
     );
   }

@@ -11,6 +11,7 @@ import android.media.MediaPlayer
 import android.media.MediaScannerConnection
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.SoundPool
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +19,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -40,13 +42,43 @@ class MainActivity : FlutterActivity() {
     private var pendingSaveTask: ((Boolean) -> Unit)? = null
     private var pendingInstallApkPath: String? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var notifMediaPlayer: MediaPlayer? = null
     private var fallbackRingtone: Ringtone? = null
+    private var tapSoundPool: SoundPool? = null
+    private var tapSoundId: Int = 0
+    private var tapSoundLoaded: Boolean = false
+    private var lastTapPlayedAtMs: Long = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
     private val autoStopRunnable = Runnable { stopNativeAlarm() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableLockScreenWake()
+        initTapSoundPool()
+    }
+
+    private fun initTapSoundPool() {
+        try {
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            val pool = SoundPool.Builder()
+                .setMaxStreams(4)
+                .setAudioAttributes(attrs)
+                .build()
+            pool.setOnLoadCompleteListener { _, sampleId, status ->
+                if (status == 0 && sampleId == tapSoundId) {
+                    tapSoundLoaded = true
+                }
+            }
+            val resId = resources.getIdentifier("tap_soft", "raw", packageName)
+            if (resId != 0) {
+                tapSoundId = pool.load(this, resId, 1)
+            }
+            tapSoundPool = pool
+        } catch (_: Exception) {
+        }
     }
 
     override fun onResume() {
@@ -118,11 +150,27 @@ class MainActivity : FlutterActivity() {
                     "startAlarmRinging" -> {
                         val vibrate = call.argument<Boolean>("vibrate") ?: true
                         val playSound = call.argument<Boolean>("playSound") ?: true
-                        startNativeAlarm(playSound = playSound, vibrate = vibrate)
+                        val soundPreset = call.argument<String>("soundPreset") ?: "classic_alarm"
+                        val previewOnly = call.argument<Boolean>("previewOnly") ?: false
+                        startNativeAlarm(
+                            playSound = playSound,
+                            vibrate = vibrate,
+                            soundPreset = soundPreset,
+                            previewOnly = previewOnly
+                        )
                         result.success(true)
                     }
                     "stopAlarmRinging" -> {
                         stopNativeAlarm()
+                        result.success(true)
+                    }
+                    "playTapSound" -> {
+                        playNativeTapSound()
+                        result.success(true)
+                    }
+                    "playNotificationSound" -> {
+                        val soundPreset = call.argument<String>("soundPreset") ?: "bubble_pop"
+                        playNativeNotificationSound(soundPreset)
                         result.success(true)
                     }
                     "ensureStoragePermission" -> {
@@ -352,12 +400,105 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun resolveAlarmUri(): Uri? {
-        return RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_NOTIFICATION)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+    private fun resolveRawResourceUri(rawName: String): Uri? {
+        val resId = resources.getIdentifier(rawName, "raw", packageName)
+        if (resId == 0) return null
+        return Uri.parse("android.resource://$packageName/$resId")
+    }
+
+    private fun resolveAlarmUri(soundPreset: String): Uri? {
+        return when (soundPreset) {
+            "oversimplified_alarm", "gentle_chime" ->
+                resolveRawResourceUri("alarm_oversimplified")
+                    ?: RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            "dreamcore_alarm", "melody_ringtone" ->
+                resolveRawResourceUri("alarm_dreamcore")
+                    ?: RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            "chiptune_alarm", "tactical_pulse" ->
+                resolveRawResourceUri("alarm_chiptune")
+                    ?: RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            else -> RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_NOTIFICATION)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+        }
+    }
+
+    private fun resolveNotificationUri(soundPreset: String): Uri? {
+        return when (soundPreset) {
+            "bubble_pop" ->
+                resolveRawResourceUri("notif_bubble_pop")
+                    ?: RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_NOTIFICATION)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            "interface_chime" ->
+                resolveRawResourceUri("notif_interface_chime")
+                    ?: RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_NOTIFICATION)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            else -> RingtoneManager.getActualDefaultRingtoneUri(applicationContext, RingtoneManager.TYPE_NOTIFICATION)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        }
+    }
+
+    private fun playNativeTapSound() {
+        try {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastTapPlayedAtMs < 55L) return
+            val pool = tapSoundPool ?: return
+            if (tapSoundLoaded && tapSoundId != 0) {
+                lastTapPlayedAtMs = now
+                pool.play(tapSoundId, 0.42f, 0.42f, 1, 0, 1.0f)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun stopNotificationPreview() {
+        try {
+            notifMediaPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (_: Exception) {
+        }
+        notifMediaPlayer = null
+    }
+
+    private fun playNativeNotificationSound(soundPreset: String) {
+        stopNotificationPreview()
+        val uri = resolveNotificationUri(soundPreset) ?: return
+        try {
+            val mp = MediaPlayer()
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            mp.setDataSource(applicationContext, uri)
+            mp.isLooping = false
+            mp.setOnCompletionListener { player ->
+                try {
+                    player.release()
+                } catch (_: Exception) {
+                }
+                if (notifMediaPlayer === player) {
+                    notifMediaPlayer = null
+                }
+            }
+            mp.prepare()
+            mp.start()
+            notifMediaPlayer = mp
+        } catch (_: Exception) {
+            stopNotificationPreview()
+            try {
+                RingtoneManager.getRingtone(applicationContext, uri)?.play()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun getVibrator(): Vibrator? {
@@ -374,11 +515,16 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun startNativeAlarm(playSound: Boolean, vibrate: Boolean) {
+    private fun startNativeAlarm(
+        playSound: Boolean,
+        vibrate: Boolean,
+        soundPreset: String = "classic_alarm",
+        previewOnly: Boolean = false
+    ) {
         stopNativeAlarm()
 
         if (playSound) {
-            val alarmUri = resolveAlarmUri()
+            val alarmUri = resolveAlarmUri(soundPreset)
             var started = false
             if (alarmUri != null) {
                 try {
@@ -442,7 +588,11 @@ class MainActivity : FlutterActivity() {
         if (vibrate) {
             try {
                 val vibrator = getVibrator()
-                val pattern = longArrayOf(0, 900, 400, 900, 400, 1200, 500)
+                val pattern = when (soundPreset) {
+                    "chiptune_alarm", "tactical_pulse" -> longArrayOf(0, 220, 120, 220, 450, 220, 120, 220)
+                    "oversimplified_alarm", "gentle_chime" -> longArrayOf(0, 350, 600, 350)
+                    else -> longArrayOf(0, 900, 400, 900, 400, 1200, 500)
+                }
                 if (vibrator != null && vibrator.hasVibrator()) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
@@ -455,8 +605,8 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // Auto-stop after 60 seconds so an unattended alarm doesn't drain battery indefinitely
-        mainHandler.postDelayed(autoStopRunnable, 60_000L)
+        // Auto-stop after 3.5s on sound preview or 60s for full alarm
+        mainHandler.postDelayed(autoStopRunnable, if (previewOnly) 3_500L else 60_000L)
     }
 
     private fun stopNativeAlarm() {
@@ -484,6 +634,13 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         stopNativeAlarm()
+        stopNotificationPreview()
+        try {
+            tapSoundPool?.release()
+        } catch (_: Exception) {
+        }
+        tapSoundPool = null
+        tapSoundLoaded = false
         super.onDestroy()
     }
 }

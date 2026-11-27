@@ -21,8 +21,9 @@ class VaultScreen extends ConsumerStatefulWidget {
 
 class _VaultScreenState extends ConsumerState<VaultScreen> {
   String? _selectedSubjectId;
+  ResourceType? _selectedCategoryFilter; // null = All study materials
   String _searchQuery = '';
-  bool _showVideos = false; // false = Notes & Slides, true = Lecture Videos
+  bool _showVideos = false; // false = Study Materials, true = Lecture Videos
   bool _onlyMyUploads = false; // Filter to show user's own contributions
   bool _onlyOfflineSaved = false; // Filter to show offline-cached documents
   final TextEditingController _searchCtrl = TextEditingController();
@@ -61,6 +62,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
     final offlineSavedCount = allResources
         .where((r) =>
             r.type != ResourceType.youtube &&
+            r.type != ResourceType.folder &&
             OfflineDocumentService.instance.peekCachedEntry(r.url) != null)
         .length;
 
@@ -80,6 +82,11 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
       // Type filter
       if (_showVideos && r.type != ResourceType.youtube) return false;
       if (!_showVideos && r.type == ResourceType.youtube) return false;
+      if (!_showVideos &&
+          _selectedCategoryFilter != null &&
+          r.type != _selectedCategoryFilter) {
+        return false;
+      }
 
       // Subject filter (with normalized UUID resolution)
       if (_selectedSubjectId != null &&
@@ -99,13 +106,13 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.palette.background,
       appBar: AppBar(
         title: const Text('Academic Vault'),
         actions: [
           IconButton(
             tooltip: 'MCQ Quizzes & Practice Tests',
-            icon: const Icon(
+            icon: Icon(
               Icons.psychology_alt_rounded,
               color: AppColors.primary,
             ),
@@ -116,7 +123,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
           ),
           IconButton(
             tooltip: 'Assignment PDF Maker (Offline)',
-            icon: const Icon(Icons.document_scanner_rounded,
+            icon: Icon(Icons.document_scanner_rounded,
                 color: AppColors.primary),
             onPressed: () => Navigator.push(
               context,
@@ -135,12 +142,12 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.bolt_rounded,
+                  Icon(Icons.bolt_rounded,
                       size: 15, color: AppColors.primary),
                   const SizedBox(width: 4),
                   Text(
                     '${user.credits} Credits',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w800,
                       fontSize: 12,
@@ -242,7 +249,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                       label: const Text('Upload'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
-                        foregroundColor: AppColors.primary,
+                        foregroundColor: AppColors.secondary,
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 6),
                         minimumSize: Size.zero,
@@ -310,7 +317,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
               padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF1F0F8),
+                  color: AppColors.surfaceMuted,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 padding: const EdgeInsets.all(4),
@@ -318,7 +325,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                   children: [
                     Expanded(
                       child: _buildTypeSegment(
-                        label: '📄 Notes & Slides',
+                        label: '📚 Study Materials',
                         isSelected: !_showVideos,
                         onTap: () => setState(() => _showVideos = false),
                       ),
@@ -334,6 +341,50 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                 ),
               ),
             ),
+
+            // Category Filter Chips (Notes / PDF / Folder / Slides)
+            if (!_showVideos) ...[
+              SizedBox(
+                height: 36,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  children: [
+                    ChoiceChip(
+                      label: const Text('All Types'),
+                      selected: _selectedCategoryFilter == null,
+                      onSelected: (val) {
+                        if (val) setState(() => _selectedCategoryFilter = null);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    for (final cat in const [
+                      ResourceType.notes,
+                      ResourceType.pdf,
+                      ResourceType.folder,
+                      ResourceType.image,
+                    ]) ...[
+                      ChoiceChip(
+                        avatar: Icon(
+                          cat.icon,
+                          size: 14,
+                          color: _selectedCategoryFilter == cat
+                              ? Colors.white
+                              : AppColors.primary,
+                        ),
+                        label: Text(cat.shortLabel),
+                        selected: _selectedCategoryFilter == cat,
+                        onSelected: (val) => setState(
+                          () => _selectedCategoryFilter = val ? cat : null,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
 
             // Subject & Contribution Filter Chips
             SizedBox(
@@ -441,7 +492,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                                 color: AppColors.primarySoft,
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.upload_file_rounded,
+                              child: Icon(Icons.upload_file_rounded,
                                   size: 40, color: AppColors.primary),
                             ),
                             const SizedBox(height: 14),
@@ -450,7 +501,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                                   ? 'No notes uploaded by you yet.'
                                   : 'No resources found in this category.',
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.textPrimary,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 15,
@@ -462,7 +513,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                                   ? 'Upload course slides, past papers, or notes for your class.'
                                   : 'Course materials and lecture notes will appear here once published.',
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.textSecondary,
                                 fontSize: 12,
                                 height: 1.4,
@@ -506,6 +557,14 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                           subject: sub,
                           isMyUpload: res.uploaderId == user.id,
                           isLiked: isLiked,
+                          isAdmin: user.isAdmin,
+                          onEdit: user.isAdmin
+                              ? () => showEditResourceModal(context, ref, res)
+                              : null,
+                          onDelete: user.isAdmin
+                              ? () => confirmDeleteResourceDialog(
+                                  context, ref, res)
+                              : null,
                           onUnlock: () => _handleUnlock(res),
                           onUpvote: () {
                             final nowLiked = ref
@@ -516,8 +575,8 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
                               SnackBar(
                                 content: Text(
                                   nowLiked
-                                      ? 'Appreciated "${res.title}" (+5 ⚡)'
-                                      : 'Removed appreciation (-5 ⚡)',
+                                      ? 'Appreciated "${res.title}"'
+                                      : 'Removed appreciation',
                                 ),
                                 behavior: SnackBarBehavior.floating,
                                 duration: const Duration(seconds: 1),
@@ -546,7 +605,7 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
+          color: isSelected ? AppColors.cardSurface : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           boxShadow: isSelected
               ? [
@@ -597,7 +656,9 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
   }
 
   Future<void> _openOrCacheResource(ResourceModel res) async {
-    if (res.type == ResourceType.youtube) {
+    if (res.type == ResourceType.youtube ||
+        res.type == ResourceType.folder ||
+        GoogleDriveUtil.isGoogleDriveFolder(res.url)) {
       await _openResourceUrl(res.url);
       return;
     }
@@ -636,16 +697,22 @@ class _ResourceCard extends StatelessWidget {
   final SubjectModel subject;
   final bool isMyUpload;
   final bool isLiked;
+  final bool isAdmin;
   final VoidCallback onUnlock;
   final VoidCallback onUpvote;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   const _ResourceCard({
     required this.resource,
     required this.subject,
     required this.isMyUpload,
     required this.isLiked,
+    this.isAdmin = false,
     required this.onUnlock,
     required this.onUpvote,
+    this.onEdit,
+    this.onDelete,
   });
 
   @override
@@ -655,12 +722,12 @@ class _ResourceCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: context.palette.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isMyUpload
-              ? AppColors.primary.withValues(alpha: 0.3)
-              : AppColors.border,
+              ? context.palette.primary.withValues(alpha: 0.3)
+              : context.palette.border,
         ),
         boxShadow: AppShadows.card,
       ),
@@ -694,14 +761,27 @@ class _ResourceCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Icon(res.type.icon, size: 14, color: AppColors.primary),
-                    const SizedBox(width: 4),
-                    Text(
-                      res.type.label,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w600,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(res.type.icon, size: 12, color: AppColors.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            res.type.shortLabel,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const Spacer(),
@@ -712,8 +792,8 @@ class _ResourceCard extends StatelessWidget {
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
                           color: res.isApproved
-                              ? const Color(0xFFDCFCE7)
-                              : const Color(0xFFFEF3C7),
+                              ? AppColors.successBg
+                              : AppColors.warningBg,
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Row(
@@ -768,7 +848,7 @@ class _ResourceCard extends StatelessWidget {
                             const SizedBox(width: 4),
                             Text(
                               isLocked ? 'Free Read' : 'Unlocked',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.primary,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w800,
@@ -784,7 +864,7 @@ class _ResourceCard extends StatelessWidget {
                 // Title
                 Text(
                   res.title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
@@ -793,24 +873,24 @@ class _ResourceCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
 
-                // Offline Storage Status Row (for PDFs and Images)
+                // Offline Storage Status Row (for Notes, PDFs, Folders & Images)
                 if (res.type != ResourceType.youtube) ...[
                   Builder(
                     builder: (context) {
-                      final isFolder =
+                      final isFolder = res.type == ResourceType.folder ||
                           GoogleDriveUtil.isGoogleDriveFolder(res.url);
                       if (isFolder) {
                         return Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFEFF6FF),
+                            color: AppColors.blueBg,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: const Color(0xFFBFDBFE),
+                              color: AppColors.blueBorder,
                             ),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
@@ -818,10 +898,12 @@ class _ResourceCard extends StatelessWidget {
                                 size: 14,
                                 color: AppColors.primary,
                               ),
-                              SizedBox(width: 6),
+                              const SizedBox(width: 6),
                               Flexible(
                                 child: Text(
-                                  'Google Drive Folder • Tap to Open & Browse Files',
+                                  GoogleDriveUtil.isGoogleDriveFolder(res.url)
+                                      ? 'Google Drive Folder • Tap to Open & Browse Files'
+                                      : 'Shared Folder • Tap to Open & Browse Files',
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
@@ -842,12 +924,12 @@ class _ResourceCard extends StatelessWidget {
                             horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                           color: isCached
-                              ? const Color(0xFFECFDF5)
-                              : const Color(0xFFF8FAFC),
+                              ? AppColors.successBg
+                              : AppColors.surfaceSubtle,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: isCached
-                                ? const Color(0xFFA7F3D0)
+                                ? AppColors.successBorder
                                 : AppColors.border,
                           ),
                         ),
@@ -873,7 +955,7 @@ class _ResourceCard extends StatelessWidget {
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   color: isCached
-                                      ? const Color(0xFF065F46)
+                                      ? AppColors.successText
                                       : AppColors.primary,
                                 ),
                               ),
@@ -889,7 +971,7 @@ class _ResourceCard extends StatelessWidget {
                 // Bottom row: Uploader name + Upvotes
                 Row(
                   children: [
-                    const Icon(Icons.account_circle_outlined,
+                    Icon(Icons.account_circle_outlined,
                         size: 14, color: AppColors.textSecondary),
                     const SizedBox(width: 4),
                     Text(
@@ -906,6 +988,47 @@ class _ResourceCard extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
+                    if (isAdmin) ...[
+                      if (onEdit != null)
+                        InkWell(
+                          onTap: onEdit,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppColors.primarySoft,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.edit_outlined,
+                              size: 14,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                      if (onEdit != null && onDelete != null)
+                        const SizedBox(width: 6),
+                      if (onDelete != null)
+                        InkWell(
+                          onTap: onDelete,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppColors.dangerBg,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.delete_outline_rounded,
+                              size: 14,
+                              color: AppColors.dangerText,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 6),
+                    ],
                     // Upvote button (Single like per document, toggleable)
                     InkWell(
                       onTap: onUpvote,
@@ -917,7 +1040,7 @@ class _ResourceCard extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: isLiked
                               ? AppColors.primary
-                              : const Color(0xFFF1F5F9),
+                              : AppColors.surfaceMuted,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
@@ -973,7 +1096,7 @@ void showUploadModal(BuildContext context, WidgetRef ref) {
             Text('Uploads Disabled', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
           ],
         ),
-        content: const Text(
+        content: Text(
           'Student uploads are temporarily paused. You have full read-only access to all verified notes, slides, timetable, and assignments!\n\nCommunity uploads and contributor rewards will be enabled in an upcoming release.',
           style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary),
         ),
@@ -994,6 +1117,456 @@ void showUploadModal(BuildContext context, WidgetRef ref) {
     backgroundColor: Colors.transparent,
     builder: (ctx) => const _UploadModalSheet(),
   );
+}
+
+/// Admin confirmation dialog to permanently delete a Vault document.
+Future<bool> confirmDeleteResourceDialog(
+  BuildContext context,
+  WidgetRef ref,
+  ResourceModel resource,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: const Row(
+        children: [
+          Icon(Icons.delete_forever_rounded, color: AppColors.danger),
+          SizedBox(width: 8),
+          Text(
+            'Delete Document?',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+      content: Text(
+        'Permanently delete "${resource.title}" from the Academic Vault and cloud sync? This cannot be undone.',
+        style: TextStyle(
+          fontSize: 13,
+          color: AppColors.textSecondary,
+          height: 1.4,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.danger,
+            foregroundColor: Colors.white,
+          ),
+          icon: const Icon(Icons.delete_outline_rounded, size: 17),
+          label: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmed != true) return false;
+  ref.read(resourcesProvider.notifier).deleteResource(resource.id);
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Deleted "${resource.title}"'),
+        backgroundColor: AppColors.snackBarBg,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+  return true;
+}
+
+/// Admin bottom sheet to edit an uploaded Vault document's metadata, link, or file.
+void showEditResourceModal(
+  BuildContext context,
+  WidgetRef ref,
+  ResourceModel resource,
+) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) => _EditResourceModalSheet(resource: resource),
+  );
+}
+
+class _EditResourceModalSheet extends ConsumerStatefulWidget {
+  final ResourceModel resource;
+
+  const _EditResourceModalSheet({required this.resource});
+
+  @override
+  ConsumerState<_EditResourceModalSheet> createState() =>
+      _EditResourceModalSheetState();
+}
+
+class _EditResourceModalSheetState
+    extends ConsumerState<_EditResourceModalSheet> {
+  late final TextEditingController _titleCtrl;
+  late final TextEditingController _urlCtrl;
+  late String _selectedSubjectId;
+  late ResourceType _selectedType;
+  late bool _isApproved;
+  PlatformFile? _replacementFile;
+  bool _isSaving = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleCtrl = TextEditingController(text: widget.resource.title);
+    _urlCtrl = TextEditingController(text: widget.resource.url);
+    final subjects = ref.read(subjectsProvider);
+    final matched = resolveSubjectById(subjects, widget.resource.subjectId);
+    _selectedSubjectId = matched?.id ??
+        (subjects.isNotEmpty ? subjects.first.id : widget.resource.subjectId);
+    _selectedType = widget.resource.type;
+    _isApproved = widget.resource.isApproved;
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickReplacementFile() async {
+    try {
+      final files = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const [
+          'pdf',
+          'doc',
+          'docx',
+          'ppt',
+          'pptx',
+          'txt',
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+        ],
+      );
+      if (files.isNotEmpty) {
+        final file = files.first;
+        setState(() {
+          _replacementFile = file;
+          _errorMessage = null;
+          _urlCtrl.text = 'local://vault/${UuidUtil.generate()}_${file.name}';
+          final lower = file.name.toLowerCase();
+          if (lower.endsWith('.jpg') ||
+              lower.endsWith('.jpeg') ||
+              lower.endsWith('.png') ||
+              lower.endsWith('.webp')) {
+            _selectedType = ResourceType.image;
+          } else {
+            _selectedType = ResourceType.pdf;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _errorMessage = 'Could not pick file: $e');
+      }
+    }
+  }
+
+  Future<void> _saveChanges() async {
+    final title = _titleCtrl.text.trim();
+    final url = _urlCtrl.text.trim();
+    if (title.isEmpty) {
+      setState(() => _errorMessage = 'Please enter a document title.');
+      return;
+    }
+    if (url.isEmpty) {
+      setState(() => _errorMessage = 'Please enter a document URL or pick a file.');
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    if (_replacementFile?.path != null && _replacementFile!.path!.isNotEmpty) {
+      await OfflineDocumentService.instance.importLocalFile(
+        sourceFilePath: _replacementFile!.path!,
+        urlKey: url,
+        title: title,
+      );
+    }
+
+    final error = ref.read(resourcesProvider.notifier).updateResource(
+          resourceId: widget.resource.id,
+          subjectId: _selectedSubjectId,
+          title: title,
+          type: _selectedType,
+          url: url,
+          isApproved: _isApproved,
+        );
+
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+
+    if (error != null) {
+      setState(() => _errorMessage = error);
+      return;
+    }
+
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Updated "$title"'),
+        backgroundColor: AppColors.snackBarBg,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Theme.of(context);
+    final subjects = ref.watch(subjectsProvider);
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        16,
+        20,
+        MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Edit Vault Document',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Update title, subject, link, or publication status across Vault & cloud.',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 14),
+
+            if (_errorMessage != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.dangerBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.dangerBorder),
+                ),
+                child: Text(
+                  _errorMessage!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.dangerText,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            if (subjects.isNotEmpty) ...[
+              DropdownButtonFormField<String>(
+                initialValue: subjects.any((s) => s.id == _selectedSubjectId)
+                    ? _selectedSubjectId
+                    : subjects.first.id,
+                decoration: const InputDecoration(
+                  labelText: 'Subject',
+                  prefixIcon: Icon(Icons.menu_book_rounded, size: 18),
+                ),
+                items: subjects
+                    .map(
+                      (s) => DropdownMenuItem<String>(
+                        value: s.id,
+                        child: Text(
+                          '${s.code} • ${s.name}',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) setState(() => _selectedSubjectId = val);
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            Text(
+              'Category',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: ResourceType.values.map((t) {
+                final selected = _selectedType == t;
+                return ChoiceChip(
+                  avatar: Icon(
+                    t.icon,
+                    size: 15,
+                    color: selected ? Colors.white : AppColors.textSecondary,
+                  ),
+                  label: Text(t.shortLabel),
+                  selected: selected,
+                  selectedColor: AppColors.primary,
+                  backgroundColor: AppColors.surfaceSubtle,
+                  labelStyle: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: selected ? Colors.white : AppColors.textPrimary,
+                  ),
+                  onSelected: (_) => setState(() => _selectedType = t),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+
+            TextField(
+              controller: _titleCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Document Title',
+                prefixIcon: Icon(Icons.title_rounded, size: 18),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            TextField(
+              controller: _urlCtrl,
+              decoration: InputDecoration(
+                labelText: 'Link or File Address',
+                prefixIcon: const Icon(Icons.link_rounded, size: 18),
+                suffixIcon: _selectedType != ResourceType.youtube &&
+                        _selectedType != ResourceType.folder
+                    ? IconButton(
+                        tooltip: 'Pick Replacement File',
+                        onPressed: _pickReplacementFile,
+                        icon: Icon(Icons.attach_file_rounded,
+                            color: AppColors.primary),
+                      )
+                    : null,
+              ),
+            ),
+            if (_replacementFile != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Selected replacement file: ${_replacementFile!.name}',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.successText,
+                ),
+              ),
+            ],
+            const SizedBox(height: 6),
+
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _isApproved,
+              onChanged: (v) => setState(() => _isApproved = v),
+              title: Text(
+                'Published in Vault',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              subtitle: Text(
+                'Turn off to send back to pending moderation review',
+                style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _isSaving
+                      ? null
+                      : () async {
+                          final deleted = await confirmDeleteResourceDialog(
+                            context,
+                            ref,
+                            widget.resource,
+                          );
+                          if (deleted && context.mounted) {
+                            Navigator.pop(context);
+                          }
+                        },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.dangerText,
+                    side: BorderSide(color: AppColors.dangerBorder),
+                    minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                  ),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('Delete'),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _isSaving ? null : _saveChanges,
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.save_rounded, size: 18),
+                    label: Text(_isSaving ? 'Saving...' : 'Save Changes'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 void showUploaderVerificationGate(BuildContext context, WidgetRef ref) {
@@ -1061,7 +1634,7 @@ class _UploaderVerificationGateSheetState
         SnackBar(
           content: Text(result.message),
           backgroundColor:
-              result.success ? AppColors.textPrimary : AppColors.danger,
+              result.success ? AppColors.snackBarBg : AppColors.danger,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1082,8 +1655,8 @@ class _UploaderVerificationGateSheetState
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: AppColors.cardSurface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
@@ -1109,9 +1682,9 @@ class _UploaderVerificationGateSheetState
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: isPending
-                          ? const Color(0xFFFEF3C7)
+                          ? AppColors.warningBg
                           : (isRejected
-                              ? const Color(0xFFFEE2E2)
+                              ? AppColors.dangerBgStrong
                               : AppColors.primarySoft),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1138,7 +1711,7 @@ class _UploaderVerificationGateSheetState
                               : (isRejected
                                   ? 'Verification Declined'
                                   : 'Contributor Authorization'),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
@@ -1148,7 +1721,7 @@ class _UploaderVerificationGateSheetState
                           isPending
                               ? 'Awaiting Administrator Approval'
                               : 'Admin review required to post notes',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             color: AppColors.textSecondary,
                           ),
@@ -1169,15 +1742,15 @@ class _UploaderVerificationGateSheetState
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFFBEB),
+                    color: AppColors.urgentBg,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFFDE68A)),
+                    border: Border.all(color: AppColors.warningBorder),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        children: const [
+                        children: [
                           Icon(Icons.pending_actions_rounded,
                               size: 18, color: Color(0xFFD97706)),
                           SizedBox(width: 8),
@@ -1186,7 +1759,7 @@ class _UploaderVerificationGateSheetState
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF92400E),
+                              color: AppColors.warningTextDeep,
                             ),
                           ),
                         ],
@@ -1201,7 +1774,7 @@ class _UploaderVerificationGateSheetState
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: AppColors.cardSurface,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Column(
@@ -1209,7 +1782,7 @@ class _UploaderVerificationGateSheetState
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Name:',
+                                Text('Name:',
                                     style: TextStyle(
                                         fontSize: 11,
                                         color: AppColors.textSecondary)),
@@ -1223,12 +1796,12 @@ class _UploaderVerificationGateSheetState
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Roll Number:',
+                                Text('Roll Number:',
                                     style: TextStyle(
                                         fontSize: 11,
                                         color: AppColors.textSecondary)),
                                 Text(user.rollNo ?? 'Not Set',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w700,
                                         color: AppColors.primary)),
@@ -1237,7 +1810,7 @@ class _UploaderVerificationGateSheetState
                             const SizedBox(height: 4),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: const [
+                              children: [
                                 Text('Verification Status:',
                                     style: TextStyle(
                                         fontSize: 11,
@@ -1270,15 +1843,15 @@ class _UploaderVerificationGateSheetState
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: AppColors.dangerBg,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFFECACA)),
+                    border: Border.all(color: AppColors.dangerBorder),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        children: const [
+                        children: [
                           Icon(Icons.error_outline_rounded,
                               size: 18, color: AppColors.danger),
                           SizedBox(width: 8),
@@ -1287,7 +1860,7 @@ class _UploaderVerificationGateSheetState
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF991B1B),
+                              color: AppColors.dangerText,
                             ),
                           ),
                         ],
@@ -1295,15 +1868,15 @@ class _UploaderVerificationGateSheetState
                       const SizedBox(height: 8),
                       Text(
                         'Your verification request for Roll No ${user.rollNo ?? ''} was not verified by the administrator.',
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFF7F1D1D), height: 1.4),
+                        style: TextStyle(
+                            fontSize: 12, color: AppColors.dangerText, height: 1.4),
                       ),
                       const SizedBox(height: 10),
-                      const Text(
+                      Text(
                         'Contact your Class Representative or administrator for authorization.',
                         style: TextStyle(
                             fontSize: 11,
-                            color: Color(0xFF991B1B),
+                            color: AppColors.dangerText,
                             fontWeight: FontWeight.w600),
                       ),
                     ],
@@ -1324,13 +1897,13 @@ class _UploaderVerificationGateSheetState
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: AppColors.surfaceMuted,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.account_circle_rounded,
+                      Icon(Icons.account_circle_rounded,
                           size: 28, color: AppColors.primary),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1344,7 +1917,7 @@ class _UploaderVerificationGateSheetState
                             ),
                             Text(
                               user.email,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 11, color: AppColors.textSecondary),
                             ),
                           ],
@@ -1357,7 +1930,7 @@ class _UploaderVerificationGateSheetState
                           color: AppColors.primarySoft,
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Text(
+                        child: Text(
                           '1 Request / Account',
                           style: TextStyle(
                               fontSize: 9,
@@ -1370,7 +1943,7 @@ class _UploaderVerificationGateSheetState
                 ),
                 const SizedBox(height: 14),
 
-                const Text(
+                Text(
                   'Full Name *',
                   style: TextStyle(
                       fontSize: 12,
@@ -1386,15 +1959,15 @@ class _UploaderVerificationGateSheetState
                     prefixIcon:
                         const Icon(Icons.person_outline_rounded, size: 20),
                     filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
+                    fillColor: AppColors.surfaceSubtle,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: AppColors.border)),
+                        borderSide: BorderSide(color: AppColors.border)),
                   ),
                 ),
                 const SizedBox(height: 12),
 
-                const Text(
+                Text(
                   'Academic Roll Number *',
                   style: TextStyle(
                       fontSize: 12,
@@ -1409,10 +1982,10 @@ class _UploaderVerificationGateSheetState
                     hintText: 'e.g. 23-SE-402',
                     prefixIcon: const Icon(Icons.badge_outlined, size: 20),
                     filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
+                    fillColor: AppColors.surfaceSubtle,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: AppColors.border)),
+                        borderSide: BorderSide(color: AppColors.border)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1420,11 +1993,11 @@ class _UploaderVerificationGateSheetState
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7).withValues(alpha: 0.6),
+                    color: AppColors.warningBg.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFDE68A)),
+                    border: Border.all(color: AppColors.warningBorder),
                   ),
-                  child: const Row(
+                  child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(Icons.info_outline_rounded,
@@ -1435,7 +2008,7 @@ class _UploaderVerificationGateSheetState
                           'Notice: You can only submit 1 verification request per Google account. Administrators will verify your Roll No against the class roster.',
                           style: TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF92400E),
+                              color: AppColors.warningTextDeep,
                               height: 1.35),
                         ),
                       ),
@@ -1447,11 +2020,11 @@ class _UploaderVerificationGateSheetState
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: AppColors.dangerBg,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFECACA)),
+                    border: Border.all(color: AppColors.dangerBorder),
                   ),
-                  child: const Row(
+                  child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(Icons.warning_amber_rounded,
@@ -1463,7 +2036,7 @@ class _UploaderVerificationGateSheetState
                           style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF991B1B),
+                              color: AppColors.dangerText,
                               height: 1.35),
                         ),
                       ),
@@ -1517,7 +2090,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
   final _titleCtrl = TextEditingController();
   final _urlCtrl = TextEditingController();
   String? _selectedSubjectId;
-  ResourceType _selectedType = ResourceType.pdf;
+  ResourceType _selectedType = ResourceType.notes;
 
   PlatformFile? _pickedFile;
   int? _pickedFileSize;
@@ -1533,11 +2106,25 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
 
   Future<void> _pickFileFromDevice() async {
     try {
+      final List<String> allowed;
+      switch (_selectedType) {
+        case ResourceType.notes:
+          allowed = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'md', 'jpg', 'jpeg', 'png'];
+          break;
+        case ResourceType.pdf:
+          allowed = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt'];
+          break;
+        case ResourceType.image:
+          allowed = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
+          break;
+        case ResourceType.folder:
+        case ResourceType.youtube:
+          allowed = ['pdf'];
+          break;
+      }
       final files = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: _selectedType == ResourceType.pdf
-            ? ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt']
-            : ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+        allowedExtensions: allowed,
       );
 
       if (files.isNotEmpty) {
@@ -1576,7 +2163,23 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
       return;
     }
 
+    if ((_selectedType == ResourceType.folder ||
+            _selectedType == ResourceType.youtube) &&
+        _urlCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _selectedType == ResourceType.folder
+                ? 'Please enter the Google Drive / cloud folder URL.'
+                : 'Please enter the YouTube video link.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (_selectedType != ResourceType.youtube &&
+        _selectedType != ResourceType.folder &&
         _pickedFile == null &&
         _urlCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1643,7 +2246,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             ),
             content: Text(
               error,
-              style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary),
+              style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary),
             ),
             actions: [
               FilledButton(
@@ -1679,7 +2282,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: AppColors.warningBg,
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
@@ -1691,7 +2294,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
               child: const Text('⚡', style: TextStyle(fontSize: 36)),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               '+50 Thunderbolts Credited!',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -1704,7 +2307,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             Text(
               'Your note "$noteTitle" has been successfully uploaded to the Academic Vault.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 color: AppColors.textSecondary,
                 height: 1.4,
@@ -1717,7 +2320,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                 color: AppColors.primarySoft,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text(
+              child: Text(
                 'You have instant unlocked access to your contribution under "My Uploads".',
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -1762,8 +2365,8 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
         20,
         MediaQuery.of(context).viewInsets.bottom + 24,
       ),
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SingleChildScrollView(
@@ -1786,7 +2389,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   'Upload Study Material',
                   style: TextStyle(
                     fontSize: 18,
@@ -1798,9 +2401,9 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
+                    color: AppColors.warningBg,
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: const Color(0xFFFDE68A)),
+                    border: Border.all(color: AppColors.warningBorder),
                   ),
                   child: Row(
                     children: const [
@@ -1821,7 +2424,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
               ],
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Select lecture notes or exam sheets from your device storage to earn credits.',
               style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
             ),
@@ -1831,11 +2434,11 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
+                color: AppColors.dangerBg,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFECACA)),
+                border: Border.all(color: AppColors.dangerBorder),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   Icon(Icons.shield_outlined, size: 16, color: Color(0xFFDC2626)),
                   SizedBox(width: 8),
@@ -1845,7 +2448,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF991B1B),
+                        color: AppColors.dangerText,
                         height: 1.3,
                       ),
                     ),
@@ -1855,60 +2458,42 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             ),
             const SizedBox(height: 14),
 
-            // Material Type Selector
+            // Material Category Selector (Notes / PDF / Folder / Slides / Video)
+            Text(
+              'Resource Category',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary),
+            ),
+            const SizedBox(height: 6),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  ChoiceChip(
-                    avatar: const Icon(Icons.picture_as_pdf_rounded, size: 16),
-                    label: const Text('PDF Document'),
-                    selected: _selectedType == ResourceType.pdf,
-                    onSelected: (val) {
-                      if (val) {
-                        setState(() {
-                          _selectedType = ResourceType.pdf;
-                          _pickedFile = null;
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    avatar: const Icon(Icons.image_rounded, size: 16),
-                    label: const Text('Handwritten Slides/Image'),
-                    selected: _selectedType == ResourceType.image,
-                    onSelected: (val) {
-                      if (val) {
-                        setState(() {
-                          _selectedType = ResourceType.image;
-                          _pickedFile = null;
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    avatar:
-                        const Icon(Icons.play_circle_filled_rounded, size: 16),
-                    label: const Text('YouTube Stream'),
-                    selected: _selectedType == ResourceType.youtube,
-                    onSelected: (val) {
-                      if (val) {
-                        setState(() {
-                          _selectedType = ResourceType.youtube;
-                          _pickedFile = null;
-                        });
-                      }
-                    },
-                  ),
+                  for (final resType in ResourceType.values) ...[
+                    ChoiceChip(
+                      avatar: Icon(resType.icon, size: 16),
+                      label: Text(resType.label),
+                      selected: _selectedType == resType,
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() {
+                            _selectedType = resType;
+                            _pickedFile = null;
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                 ],
               ),
             ),
             const SizedBox(height: 14),
 
             // Course / Subject selector
-            const Text(
+            Text(
               'Target Course',
               style: TextStyle(
                   fontSize: 13,
@@ -1919,7 +2504,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: AppColors.surfaceSubtle,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.border),
               ),
@@ -1961,9 +2546,10 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             ),
             const SizedBox(height: 14),
 
-            // Device File Picker for PDFs and Images
-            if (_selectedType != ResourceType.youtube) ...[
-              const Text(
+            // Device File Picker for Notes, PDFs and Images
+            if (_selectedType != ResourceType.youtube &&
+                _selectedType != ResourceType.folder) ...[
+              Text(
                 'Upload Document from Device',
                 style: TextStyle(
                     fontSize: 13,
@@ -1991,26 +2577,28 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                       children: [
                         Container(
                           padding: const EdgeInsets.all(12),
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
+                          decoration: BoxDecoration(
+                            color: AppColors.cardSurface,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.cloud_upload_rounded,
+                          child: Icon(Icons.cloud_upload_rounded,
                               color: AppColors.primary, size: 28),
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          _selectedType == ResourceType.pdf
-                              ? 'Browse & Select PDF Note'
-                              : 'Browse & Select Note Photos / Slides',
-                          style: const TextStyle(
+                          _selectedType == ResourceType.notes
+                              ? 'Browse & Select Lecture Notes'
+                              : (_selectedType == ResourceType.pdf
+                                  ? 'Browse & Select PDF Document'
+                                  : 'Browse & Select Note Photos / Slides'),
+                          style: TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 14,
                             color: AppColors.textPrimary,
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           'Tap to choose file from storage (up to 50MB)',
                           style: TextStyle(
                               fontSize: 11, color: AppColors.textSecondary),
@@ -2023,7 +2611,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: AppColors.surfaceSubtle,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: AppColors.border),
                   ),
@@ -2036,9 +2624,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Icon(
-                          _selectedType == ResourceType.pdf
-                              ? Icons.picture_as_pdf_rounded
-                              : Icons.image_rounded,
+                          _selectedType.icon,
                           color: AppColors.primary,
                           size: 24,
                         ),
@@ -2071,7 +2657,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                       ),
                       IconButton(
                         tooltip: 'Change file',
-                        icon: const Icon(Icons.refresh_rounded,
+                        icon: Icon(Icons.refresh_rounded,
                             size: 20, color: AppColors.textSecondary),
                         onPressed: _pickFileFromDevice,
                       ),
@@ -2088,7 +2674,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             ],
 
             // Title field
-            const Text(
+            Text(
               'Title / Topic Description',
               style: TextStyle(
                   fontSize: 13,
@@ -2099,25 +2685,31 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
             TextField(
               controller: _titleCtrl,
               decoration: InputDecoration(
-                hintText: 'e.g., Dynamic Programming & Tree Traversal Summary',
+                hintText: _selectedType == ResourceType.folder
+                    ? 'e.g., Complete Midterm Notes & Slides Folder'
+                    : 'e.g., Dynamic Programming & Tree Traversal Summary',
                 prefixIcon: const Icon(Icons.title_rounded, size: 20),
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
               ),
             ),
             const SizedBox(height: 14),
 
-            // Link field (Optional for files, Required for YouTube)
-            if (_selectedType == ResourceType.youtube || _pickedFile == null) ...[
+            // Link field (Optional for files, Required for YouTube & Shared Folder)
+            if (_selectedType == ResourceType.youtube ||
+                _selectedType == ResourceType.folder ||
+                _pickedFile == null) ...[
               Text(
                 _selectedType == ResourceType.youtube
-                    ? 'YouTube Video Link'
-                    : 'Alternative Cloud Link / Drive URL (Optional)',
-                style: const TextStyle(
+                    ? 'YouTube Video Link *'
+                    : (_selectedType == ResourceType.folder
+                        ? 'Folder Link (Google Drive / Cloud Folder URL) *'
+                        : 'Alternative Cloud Link / Drive URL (Optional)'),
+                style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary),
@@ -2128,13 +2720,20 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
                 decoration: InputDecoration(
                   hintText: _selectedType == ResourceType.youtube
                       ? 'https://www.youtube.com/watch?v=...'
-                      : 'https://drive.google.com/...',
-                  prefixIcon: const Icon(Icons.link_rounded, size: 20),
+                      : (_selectedType == ResourceType.folder
+                          ? 'https://drive.google.com/drive/folders/...'
+                          : 'https://drive.google.com/...'),
+                  prefixIcon: Icon(
+                    _selectedType == ResourceType.folder
+                        ? Icons.folder_shared_rounded
+                        : Icons.link_rounded,
+                    size: 20,
+                  ),
                   filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
+                  fillColor: AppColors.surfaceSubtle,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.border),
+                    borderSide: BorderSide(color: AppColors.border),
                   ),
                 ),
               ),
@@ -2153,7 +2752,7 @@ class _UploadModalSheetState extends ConsumerState<_UploadModalSheet> {
               Center(
                 child: Text(
                   'Uploading notes to Academic Vault... ${(_uploadProgress * 100).toInt()}%',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11,
                       color: AppColors.primary,
                       fontWeight: FontWeight.w700),

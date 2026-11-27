@@ -753,7 +753,7 @@ class OfflineDocumentService {
                       color: AppColors.primarySoft,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.downloading_rounded,
                       color: AppColors.primary,
                       size: 30,
@@ -762,7 +762,7 @@ class OfflineDocumentService {
                   const SizedBox(height: 16),
                   Text(
                     'Saving Offline Copy... $pct',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
                       color: AppColors.textPrimary,
@@ -774,7 +774,7 @@ class OfflineDocumentService {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textSecondary,
                     ),
@@ -787,7 +787,7 @@ class OfflineDocumentService {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Next time you tap this document, it will open instantly offline from device storage.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
@@ -882,7 +882,7 @@ class OfflineDocumentService {
         ),
         content: Text(
           result.message,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
             color: AppColors.textSecondary,
             height: 1.4,
@@ -1144,24 +1144,24 @@ class _OfflineDocumentViewerScreenState
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: const BoxDecoration(
-              color: Color(0xFFECFDF5),
-              border: Border(bottom: BorderSide(color: Color(0xFFA7F3D0))),
+            decoration: BoxDecoration(
+              color: AppColors.successBg,
+              border: Border(bottom: BorderSide(color: AppColors.successBorder)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.offline_pin_rounded,
-                    size: 16, color: Color(0xFF059669)),
+                Icon(Icons.offline_pin_rounded,
+                    size: 16, color: AppColors.successText),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Local path: ${_entry.localFilePath}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       fontFamily: 'monospace',
-                      color: Color(0xFF065F46),
+                      color: AppColors.successText,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1190,8 +1190,8 @@ class _OfflineDocumentViewerScreenState
           children: [
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                color: Color(0xFFFEE2E2),
+              decoration: BoxDecoration(
+                color: AppColors.dangerBgStrong,
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -1201,7 +1201,7 @@ class _OfflineDocumentViewerScreenState
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'File Not Found or Unreadable',
               style: TextStyle(
                 fontSize: 16,
@@ -1213,7 +1213,7 @@ class _OfflineDocumentViewerScreenState
             Text(
               _error!,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 color: AppColors.textSecondary,
                 height: 1.4,
@@ -1291,7 +1291,7 @@ class _OfflineDocumentViewerScreenState
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.insert_drive_file_rounded,
+            Icon(Icons.insert_drive_file_rounded,
                 size: 56, color: AppColors.primary),
             const SizedBox(height: 14),
             Text(
@@ -1306,7 +1306,7 @@ class _OfflineDocumentViewerScreenState
             Text(
               'Saved offline (${_entry.formattedSize}) at:\n${_entry.localFilePath}',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 color: AppColors.textSecondary,
               ),

@@ -19,6 +19,7 @@ class AssignmentTrackerScreen extends ConsumerStatefulWidget {
 class _AssignmentTrackerScreenState
     extends ConsumerState<AssignmentTrackerScreen> {
   String _selectedFilter = 'all'; // 'all', 'urgent', 'pending', 'completed'
+  TaskCategory? _selectedCategory; // null = All types
   String? _selectedSubjectId;
 
   @override
@@ -31,8 +32,11 @@ class _AssignmentTrackerScreenState
     // Subject mapping
     final subjectMap = {for (var s in subjects) s.id: s};
 
-    // Filter assignments
+    // Filter assignments, quizzes & presentations
     final filtered = assignments.where((a) {
+      if (_selectedCategory != null && a.category != _selectedCategory) {
+        return false;
+      }
       if (_selectedSubjectId != null &&
           a.subjectId != _selectedSubjectId &&
           UuidUtil.fromString(a.subjectId) !=
@@ -56,14 +60,14 @@ class _AssignmentTrackerScreenState
     final progress = total > 0 ? (completedCount / total) : 0.0;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.palette.background,
       appBar: AppBar(
-        title: const Text('Assignment Tracker'),
+        title: const Text('Tasks & Class Alerts'),
         actions: [
           if (user.isAdmin)
             IconButton(
-              tooltip: 'Post New Assignment',
-              icon: const Icon(Icons.add_task_rounded, color: AppColors.primary),
+              tooltip: 'Notify Assignment, Quiz or Presentation',
+              icon: Icon(Icons.add_task_rounded, color: AppColors.primary),
               onPressed: () => _showCreateAssignmentDialog(context, subjects),
             ),
         ],
@@ -75,7 +79,7 @@ class _AssignmentTrackerScreenState
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
               icon: const Icon(Icons.add_rounded),
-              label: const Text('Post Assignment'),
+              label: const Text('Post Task / Alert'),
             )
           : null,
       body: SafeArea(
@@ -86,9 +90,9 @@ class _AssignmentTrackerScreenState
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 10),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: context.palette.cardSurface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: context.palette.border),
                 boxShadow: AppShadows.card,
               ),
               child: Column(
@@ -99,7 +103,7 @@ class _AssignmentTrackerScreenState
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Your Personal Progress',
                             style: TextStyle(
                               fontSize: 14,
@@ -109,8 +113,8 @@ class _AssignmentTrackerScreenState
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '$completedCount of $total Assignments Completed',
-                            style: const TextStyle(
+                            '$completedCount of $total Tasks Completed',
+                            style: TextStyle(
                               fontSize: 12,
                               color: AppColors.textSecondary,
                               fontWeight: FontWeight.w600,
@@ -123,7 +127,7 @@ class _AssignmentTrackerScreenState
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: progress == 1.0
-                              ? const Color(0xFFDCFCE7)
+                              ? AppColors.successBg
                               : AppColors.primarySoft,
                           borderRadius: BorderRadius.circular(999),
                         ),
@@ -133,7 +137,7 @@ class _AssignmentTrackerScreenState
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                             color: progress == 1.0
-                                ? const Color(0xFF15803D)
+                                ? AppColors.successText
                                 : AppColors.primary,
                           ),
                         ),
@@ -146,7 +150,7 @@ class _AssignmentTrackerScreenState
                     child: LinearProgressIndicator(
                       value: progress,
                       minHeight: 8,
-                      backgroundColor: const Color(0xFFF1F5F9),
+                      backgroundColor: AppColors.surfaceMuted,
                       color: progress == 1.0
                           ? const Color(0xFF10B981)
                           : AppColors.primary,
@@ -154,15 +158,15 @@ class _AssignmentTrackerScreenState
                   ),
                   const SizedBox(height: 10),
                   Row(
-                    children: const [
+                    children: [
                       Icon(Icons.lock_outline_rounded,
-                          size: 13, color: Color(0xFF94A3B8)),
+                          size: 13, color: AppColors.textSecondary),
                       SizedBox(width: 5),
                       Text(
                         'Checkmarks are saved privately on your device only.',
                         style: TextStyle(
                             fontSize: 11,
-                            color: Color(0xFF94A3B8),
+                            color: AppColors.textSecondary,
                             fontWeight: FontWeight.w500),
                       ),
                     ],
@@ -188,6 +192,38 @@ class _AssignmentTrackerScreenState
                   _buildStatusChip('pending', 'Pending (${total - completedCount})'),
                   const SizedBox(width: 8),
                   _buildStatusChip('completed', 'Done ($completedCount)'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Category Filter Chips (Assignments / Quizzes / Presentations)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('All Types', style: TextStyle(fontSize: 11)),
+                    selected: _selectedCategory == null,
+                    onSelected: (val) {
+                      if (val) setState(() => _selectedCategory = null);
+                    },
+                  ),
+                  for (final cat in TaskCategory.values) ...[
+                    const SizedBox(width: 6),
+                    ChoiceChip(
+                      avatar: Text(cat.emoji, style: const TextStyle(fontSize: 12)),
+                      label: Text(
+                        '${cat.pluralLabel} (${assignments.where((a) => a.category == cat).length})',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      selected: _selectedCategory == cat,
+                      onSelected: (val) => setState(
+                        () => _selectedCategory = val ? cat : null,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -249,15 +285,15 @@ class _AssignmentTrackerScreenState
                                 color: AppColors.primarySoft,
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.assignment_turned_in_rounded,
                                 size: 38,
                                 color: AppColors.primary,
                               ),
                             ),
                             const SizedBox(height: 14),
-                            const Text(
-                              'No Assignments Here!',
+                            Text(
+                              'Nothing Here Yet!',
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
@@ -267,12 +303,12 @@ class _AssignmentTrackerScreenState
                             const SizedBox(height: 4),
                             Text(
                               _selectedFilter == 'completed'
-                                  ? 'You haven\'t marked any assignments as completed yet.'
+                                  ? 'You haven\'t marked any tasks as completed yet.'
                                   : (_selectedFilter == 'urgent'
-                                      ? 'No assignments due today or tomorrow. Great job staying ahead!'
-                                      : 'No assignments match the selected filters.'),
+                                      ? 'No assignments, quizzes, or presentations due today or tomorrow.'
+                                      : 'No tasks or alerts match the selected filters.'),
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 color: AppColors.textSecondary,
                               ),
@@ -315,7 +351,7 @@ class _AssignmentTrackerScreenState
       ),
       selected: isSelected,
       selectedColor: customColor ?? AppColors.primary,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.cardSurface,
       side: BorderSide(
         color: isSelected
             ? Colors.transparent
@@ -345,21 +381,21 @@ class _AssignmentTrackerScreenState
       statusColor = const Color(0xFFEA580C);
       statusLabel = 'DUE TOMORROW (${a.formattedDeadline})';
     } else if (a.isOverdue) {
-      statusColor = const Color(0xFF64748B);
+      statusColor = AppColors.textSecondary;
       statusLabel = 'OVERDUE (${a.formattedDeadline})';
     }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.palette.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDone
               ? const Color(0xFF86EFAC)
               : (a.isDueTomorrow || a.isDueToday
                   ? statusColor.withValues(alpha: 0.5)
-                  : AppColors.border),
+                  : context.palette.border),
           width: (a.isDueTomorrow || a.isDueToday) ? 1.5 : 1.0,
         ),
         boxShadow: AppShadows.card,
@@ -369,43 +405,75 @@ class _AssignmentTrackerScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top Row: Subject pill + Deadline badge
+            // Top Row: Subject pill + Category badge + Deadline badge
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                if (sub != null)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: sub.color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+                Flexible(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (sub != null)
                         Container(
-                          width: 6,
-                          height: 6,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: sub.color,
-                            shape: BoxShape.circle,
+                            color: sub.color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: sub.color,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                sub.code,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: sub.color,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          sub.code,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: a.category == TaskCategory.quiz
+                              ? AppColors.warningBg
+                              : (a.category == TaskCategory.presentation
+                                  ? AppColors.infoBg
+                                  : AppColors.primarySoft),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '${a.category.emoji} ${a.category.label.toUpperCase()}',
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: 10,
                             fontWeight: FontWeight.w800,
-                            color: sub.color,
+                            color: a.category == TaskCategory.quiz
+                                ? AppColors.warningText
+                                : (a.category == TaskCategory.presentation
+                                    ? AppColors.infoText
+                                    : AppColors.primary),
                           ),
                         ),
-                      ],
-                    ),
-                  )
-                else
-                  const SizedBox.shrink(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -468,7 +536,7 @@ class _AssignmentTrackerScreenState
                               ? TextDecoration.lineThrough
                               : TextDecoration.none,
                           color: isDone
-                              ? const Color(0xFF94A3B8)
+                              ? AppColors.textSecondary
                               : AppColors.textPrimary,
                         ),
                       ),
@@ -479,7 +547,7 @@ class _AssignmentTrackerScreenState
                           style: TextStyle(
                             fontSize: 12,
                             color: isDone
-                                ? const Color(0xFFCBD5E1)
+                                ? AppColors.borderStrong
                                 : AppColors.textSecondary,
                             height: 1.35,
                           ),
@@ -502,43 +570,45 @@ class _AssignmentTrackerScreenState
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    InkWell(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AssignmentScannerScreen(
-                            initialAssignment: a,
+                    if (a.category == TaskCategory.assignment)
+                      InkWell(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AssignmentScannerScreen(
+                              initialAssignment: a,
+                            ),
+                          ),
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.document_scanner_rounded,
+                                  size: 14, color: AppColors.primary),
+                              const SizedBox(width: 5),
+                              Text(
+                                'Scan & Make PDF',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppColors.primarySoft,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.document_scanner_rounded,
-                                size: 14, color: AppColors.primary),
-                            SizedBox(width: 5),
-                            Text(
-                              'Scan & Make PDF',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
                     if (a.driveUrl != null && a.driveUrl!.isNotEmpty) ...[
-                      const SizedBox(width: 8),
+                      if (a.category == TaskCategory.assignment)
+                        const SizedBox(width: 8),
                       Builder(
                         builder: (context) {
                           final cached = OfflineDocumentService.instance
@@ -562,11 +632,11 @@ class _AssignmentTrackerScreenState
                                   horizontal: 8, vertical: 6),
                               decoration: BoxDecoration(
                                 color: isCached
-                                    ? const Color(0xFFECFDF5)
-                                    : const Color(0xFFF1F5F9),
+                                    ? AppColors.successBg
+                                    : AppColors.surfaceMuted,
                                 borderRadius: BorderRadius.circular(8),
                                 border: isCached
-                                    ? Border.all(color: const Color(0xFFA7F3D0))
+                                    ? Border.all(color: AppColors.successBorder)
                                     : null,
                               ),
                               child: Row(
@@ -590,7 +660,7 @@ class _AssignmentTrackerScreenState
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
                                       color: isCached
-                                          ? const Color(0xFF065F46)
+                                          ? AppColors.successText
                                           : AppColors.primary,
                                     ),
                                   ),
@@ -608,7 +678,7 @@ class _AssignmentTrackerScreenState
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.edit_outlined,
+                        icon: Icon(Icons.edit_outlined,
                             size: 18, color: AppColors.primary),
                         tooltip: 'Edit Assignment',
                         onPressed: () => _showCreateAssignmentDialog(
@@ -637,7 +707,7 @@ class _AssignmentTrackerScreenState
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Assignment?'),
+        title: Text('Delete ${a.category.label}?'),
         content: Text('Are you sure you want to delete "${a.title}"?'),
         actions: [
           TextButton(
@@ -654,9 +724,9 @@ class _AssignmentTrackerScreenState
               if (context.mounted) {
                 if (error == null) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Assignment deleted successfully.'),
-                      backgroundColor: AppColors.textPrimary,
+                    SnackBar(
+                      content: Text('${a.category.label} deleted successfully.'),
+                      backgroundColor: AppColors.snackBarBg,
                     ),
                   );
                 } else {
@@ -682,6 +752,8 @@ class _AssignmentTrackerScreenState
     AssignmentModel? existingAssignment,
   }) {
     final isEditing = existingAssignment != null;
+    TaskCategory selectedCategory =
+        existingAssignment?.category ?? TaskCategory.assignment;
     final titleCtrl =
         TextEditingController(text: existingAssignment?.title ?? '');
     final descCtrl =
@@ -715,8 +787,8 @@ class _AssignmentTrackerScreenState
             ),
             child: Container(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              decoration: const BoxDecoration(
-                color: Colors.white,
+              decoration: BoxDecoration(
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: SingleChildScrollView(
@@ -737,21 +809,52 @@ class _AssignmentTrackerScreenState
                     const SizedBox(height: 16),
                     Text(
                       isEditing
-                          ? 'Edit Class Assignment'
-                          : 'Post New Class Assignment',
-                      style: const TextStyle(
+                          ? 'Edit ${selectedCategory.label}'
+                          : 'Notify Class: ${selectedCategory.label}',
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      'This assignment will sync to all students and schedule deadline reminders.',
+                    Text(
+                      'Syncs to all students, shows on Home Urgent Alerts, and schedules 24h & 2h reminders.',
                       style: TextStyle(
                           fontSize: 12, color: AppColors.textSecondary),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+
+                    // Category Selector: Assignment / Quiz / Presentation
+                    const Text('Notification Type *',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: TaskCategory.values.map((cat) {
+                        final isSel = selectedCategory == cat;
+                        return ChoiceChip(
+                          avatar: Text(cat.emoji,
+                              style: const TextStyle(fontSize: 13)),
+                          label: Text(cat.label),
+                          selected: isSel,
+                          selectedColor: AppColors.primary,
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isSel ? Colors.white : AppColors.textPrimary,
+                          ),
+                          onSelected: (val) {
+                            if (val) {
+                              setModalState(() => selectedCategory = cat);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
 
                     // Subject Dropdown
                     const Text('Course *',
@@ -761,7 +864,7 @@ class _AssignmentTrackerScreenState
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppColors.surfaceSubtle,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: AppColors.border),
                       ),
@@ -785,16 +888,20 @@ class _AssignmentTrackerScreenState
                     const SizedBox(height: 12),
 
                     // Title
-                    const Text('Assignment Title *',
-                        style: TextStyle(
+                    Text('${selectedCategory.label} Title *',
+                        style: const TextStyle(
                             fontSize: 12, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 6),
                     TextField(
                       controller: titleCtrl,
                       decoration: InputDecoration(
-                        hintText: 'e.g. Lab 4: Tree Traversal in C++',
+                        hintText: selectedCategory == TaskCategory.quiz
+                            ? 'e.g. Surprise / Chapter 3 Quiz'
+                            : (selectedCategory == TaskCategory.presentation
+                                ? 'e.g. Group Project Architecture Presentation'
+                                : 'e.g. Lab 4: Tree Traversal in C++'),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
@@ -802,7 +909,7 @@ class _AssignmentTrackerScreenState
                     const SizedBox(height: 12),
 
                     // Description
-                    const Text('Instructions / Problem Statement',
+                    const Text('Syllabus / Instructions',
                         style: TextStyle(
                             fontSize: 12, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 6),
@@ -810,9 +917,13 @@ class _AssignmentTrackerScreenState
                       controller: descCtrl,
                       maxLines: 3,
                       decoration: InputDecoration(
-                        hintText: 'Enter guidelines, submission portal, etc.',
+                        hintText: selectedCategory == TaskCategory.quiz
+                            ? 'Enter chapters covered, venue, or quiz format...'
+                            : (selectedCategory == TaskCategory.presentation
+                                ? 'Enter group order, slide duration, or rubric...'
+                                : 'Enter guidelines, submission portal, etc.'),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
@@ -820,9 +931,13 @@ class _AssignmentTrackerScreenState
                     const SizedBox(height: 12),
 
                     // Deadline Pickers
-                    const Text('Submission Deadline *',
-                        style: TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w700)),
+                    Text(
+                      selectedCategory == TaskCategory.assignment
+                          ? 'Submission Deadline *'
+                          : '${selectedCategory.label} Date & Time *',
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
                     const SizedBox(height: 6),
                     Row(
                       children: [
@@ -884,7 +999,7 @@ class _AssignmentTrackerScreenState
                         hintText: 'https://drive.google.com/...',
                         prefixIcon: const Icon(Icons.link_rounded, size: 20),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
@@ -903,9 +1018,9 @@ class _AssignmentTrackerScreenState
                         final title = titleCtrl.text.trim();
                         if (title.isEmpty || subjectId == null) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content:
-                                    Text('Please enter an assignment title.')),
+                            SnackBar(
+                                content: Text(
+                                    'Please enter a ${selectedCategory.label.toLowerCase()} title.')),
                           );
                           return;
                         }
@@ -931,6 +1046,7 @@ class _AssignmentTrackerScreenState
                                   driveUrl: urlCtrl.text.trim().isNotEmpty
                                       ? urlCtrl.text.trim()
                                       : null,
+                                  category: selectedCategory,
                                 ),
                               );
                         } else {
@@ -942,6 +1058,7 @@ class _AssignmentTrackerScreenState
                                 description: descCtrl.text.trim(),
                                 deadline: combinedDeadline,
                                 driveUrl: urlCtrl.text.trim(),
+                                category: selectedCategory,
                               );
                         }
 
@@ -951,8 +1068,8 @@ class _AssignmentTrackerScreenState
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(isEditing
-                                    ? 'Assignment updated and synced with class!'
-                                    : 'Assignment posted and synced with class!'),
+                                    ? '${selectedCategory.label} updated & synced with class!'
+                                    : '${selectedCategory.label} notification posted & synced with class!'),
                                 backgroundColor: AppColors.success,
                               ),
                             );
@@ -970,8 +1087,10 @@ class _AssignmentTrackerScreenState
                       },
                       child: Text(
                         isEditing
-                            ? 'Update Assignment & Sync'
-                            : 'Publish Assignment to Class',
+                            ? 'Update ${selectedCategory.label} & Sync'
+                            : (selectedCategory == TaskCategory.assignment
+                                ? 'Publish Assignment to Class'
+                                : 'Notify Class of Upcoming ${selectedCategory.label}'),
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),

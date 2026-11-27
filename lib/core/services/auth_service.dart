@@ -26,6 +26,8 @@ class AuthService {
   static const String _keyAdminPasscode = 'auth_admin_master_passcode';
   static const String _keyAdminWhitelist = 'auth_admin_authorized_roll_numbers';
   static const String _keyUploaderRequests = 'auth_uploader_verification_requests';
+  static const String _keyStudentVerifications =
+      'auth_student_verification_requests_v1';
   static const List<String> _defaultAdminWhitelist = ['23-SE-402', 'ADMIN-01', 'CR-01'];
   static const String _salt = 'kzynovex_salt_2026_';
 
@@ -226,7 +228,7 @@ class AuthService {
       rollNo: cleanRoll,
       credits: 50, // Welcome bonus
       streakCount: 1,
-      isKzynovexVerified: true,
+      isKzynovexVerified: false,
       isLoggedIn: true,
     );
 
@@ -240,7 +242,7 @@ class AuthService {
       'pin_hash': hashedPin,
       'credits': user.credits,
       'streak_count': user.streakCount,
-      'is_kzynovex_verified': true,
+      'is_kzynovex_verified': false,
       'registered_at': DateTime.now().toIso8601String(),
     };
     await _saveRegistry(registry);
@@ -257,7 +259,7 @@ class AuthService {
           'role': user.role,
           'credits': user.credits,
           'streak_count': user.streakCount,
-          'is_kzynovex_verified': true,
+          'is_kzynovex_verified': false,
         });
       } catch (e) {
         debugPrint('Remote user creation skipped/failed: $e');
@@ -641,7 +643,7 @@ class AuthService {
               'credits': remote['credits'] ?? (isDesignatedAdmin ? 500 : 50),
               'streak_count': remote['streak_count'] ?? 1,
               'is_kzynovex_verified':
-                  isDesignatedAdmin || (remote['is_kzynovex_verified'] ?? true),
+                  isDesignatedAdmin || (remote['is_kzynovex_verified'] ?? false),
               'can_upload': canUp,
               'upload_request_status': canUp ? 'approved' : 'none',
             };
@@ -796,6 +798,31 @@ class AuthService {
     if (_isSupabaseActive) {
       try {
         final client = Supabase.instance.client;
+        final current = await getActiveSession();
+        final adminId = (current != null && current.isAdmin) ? current.id : null;
+        if (adminId != null) {
+          try {
+            await client.rpc('admin_update_user_secure', params: {
+              'p_admin_id': UuidUtil.fromString(adminId),
+              'p_target_user_id': UuidUtil.fromString(user.id),
+              'p_name': user.name,
+              'p_email': user.email,
+              'p_role': user.role,
+              'p_credits': user.credits,
+              'p_streak_count': user.streakCount,
+              'p_is_verified': user.isKzynovexVerified,
+              'p_can_upload': user.canUpload,
+            }).timeout(const Duration(seconds: 6));
+            return true;
+          } catch (rpcErr) {
+            final s = rpcErr.toString().toLowerCase();
+            if (!(s.contains('pgrst202') ||
+                s.contains('42883') ||
+                s.contains('could not find the function'))) {
+              debugPrint('admin_update_user_secure RPC failed: $rpcErr');
+            }
+          }
+        }
         await client.from('users').upsert({
           'id': UuidUtil.fromString(user.id),
           'name': user.name,
@@ -812,6 +839,27 @@ class AuthService {
     }
 
     return true;
+  }
+
+  /// Syncs a bounded credit delta via server-side SECURITY DEFINER RPCs
+  /// (`award_quiz_credits` or `adjust_resource_credits`).
+  Future<void> syncCreditsDelta(
+    String userId,
+    int delta, {
+    bool isQuiz = false,
+  }) async {
+    if (delta == 0 || !_isSupabaseActive) return;
+    try {
+      final client = Supabase.instance.client;
+      final rpcName =
+          (isQuiz && delta > 0) ? 'award_quiz_credits' : 'adjust_resource_credits';
+      await client.rpc(rpcName, params: {
+        'p_user_id': UuidUtil.fromString(userId),
+        'p_delta': delta,
+      }).timeout(const Duration(seconds: 6));
+    } catch (e) {
+      debugPrint('Supabase credit delta RPC skipped: $e');
+    }
   }
 
   /// Admin function: Delete/unclaim user account
@@ -898,8 +946,10 @@ class AuthService {
       }
     }
 
-    // If not found locally, check remote Supabase users table with timeout
-    if (existingRecord == null && _isSupabaseActive) {
+    // Always check remote Supabase users table by email when connected so
+    // an existing authoritative cloud row's UUID/credits aren't shadowed by a seeded local record.
+    Map<String, dynamic>? remoteRecord;
+    if (_isSupabaseActive) {
       try {
         final client = Supabase.instance.client;
         final res = await client
@@ -907,9 +957,12 @@ class AuthService {
             .select()
             .eq('email', cleanEmail)
             .maybeSingle()
-            .timeout(const Duration(seconds: 3));
+            .timeout(const Duration(seconds: 4));
         if (res != null) {
-          existingRecord = Map<String, dynamic>.from(res);
+          remoteRecord = Map<String, dynamic>.from(res);
+          existingRecord = existingRecord != null
+              ? {...existingRecord, ...remoteRecord}
+              : remoteRecord;
         }
       } catch (e) {
         debugPrint('Supabase remote lookup timed out or skipped: $e');
@@ -930,7 +983,9 @@ class AuthService {
         : (userRequest?.status ?? (existingRecord?['upload_request_status'] as String? ?? 'none'));
     String? rollNo = existingRecord?['roll_no'] as String? ?? userRequest?.rollNo;
 
-    final userId = existingRecord?['id'] as String? ?? UuidUtil.generate();
+    final userId = (remoteRecord?['id'] as String?)?.trim().isNotEmpty == true
+        ? (remoteRecord!['id'] as String).trim()
+        : (existingRecord?['id'] as String? ?? UuidUtil.generate());
     final resolvedName = (cleanName != 'Google User' && cleanName.isNotEmpty)
         ? cleanName
         : (existingRecord?['name'] as String? ?? 'Student');
@@ -942,7 +997,7 @@ class AuthService {
       role: isAdmin ? 'admin' : (existingRecord?['role'] as String? ?? 'student'),
       credits: (existingRecord?['credits'] as num?)?.toInt() ?? (isAdmin ? 500 : 50),
       streakCount: (existingRecord?['streak_count'] as num?)?.toInt() ?? 1,
-      isKzynovexVerified: isAdmin || (existingRecord?['is_kzynovex_verified'] as bool? ?? true),
+      isKzynovexVerified: isAdmin || (existingRecord?['is_kzynovex_verified'] as bool? ?? false),
       avatarUrl: avatarUrl ?? existingRecord?['avatar_url'] as String?,
       rollNo: rollNo ??
           (isAdmin
@@ -1225,6 +1280,558 @@ class AuthService {
       await _saveActiveSession(updatedSession);
     }
 
+    return true;
+  }
+
+  /// Deducts credits for Cosmetics Store unlocks via server-side RPC and
+  /// stores [itemId] in `public.users.unlocked_cosmetics` so unlocks survive reinstalls.
+  Future<void> spendCosmeticCredits(
+    String userId,
+    int cost, {
+    String? itemId,
+  }) async {
+    if (cost <= 0 || !_isSupabaseActive) return;
+    final client = Supabase.instance.client;
+    try {
+      await client.rpc('spend_cosmetic_credits', params: {
+        'p_user_id': UuidUtil.fromString(userId),
+        'p_cost': cost,
+        'p_item_id': itemId,
+      }).timeout(const Duration(seconds: 6));
+      return;
+    } catch (e) {
+      debugPrint('spend_cosmetic_credits (3-arg) RPC skipped: $e');
+    }
+    try {
+      await client.rpc('spend_cosmetic_credits', params: {
+        'p_user_id': UuidUtil.fromString(userId),
+        'p_cost': cost,
+      }).timeout(const Duration(seconds: 6));
+    } catch (e) {
+      debugPrint('spend_cosmetic_credits (2-arg) RPC skipped, trying fallback: $e');
+      await syncCreditsDelta(userId, -cost.clamp(1, 20));
+    }
+  }
+
+  /// Fetches the authoritative user profile (credits, verified badge, role,
+  /// upload permission, unlocked cosmetics) from Supabase and refreshes local session.
+  Future<({UserModel? user, List<String> unlockedCosmetics})>
+      fetchFreshProfileFromCloud(UserModel current) async {
+    if (!_isSupabaseActive || !current.isLoggedIn) {
+      return (user: null, unlockedCosmetics: const <String>[]);
+    }
+    try {
+      final client = Supabase.instance.client;
+      Map<String, dynamic>? row;
+      try {
+        final byId = await client
+            .from('users')
+            .select()
+            .eq('id', UuidUtil.fromString(current.id))
+            .limit(1)
+            .timeout(const Duration(seconds: 5));
+        if ((byId as List).isNotEmpty) {
+          row = Map<String, dynamic>.from(byId.first as Map);
+        }
+      } catch (_) {}
+
+      if (row == null && current.email.trim().isNotEmpty) {
+        try {
+          final byEmail = await client
+              .from('users')
+              .select()
+              .eq('email', current.email.trim().toLowerCase())
+              .limit(1)
+              .timeout(const Duration(seconds: 5));
+          if ((byEmail as List).isNotEmpty) {
+            row = Map<String, dynamic>.from(byEmail.first as Map);
+          }
+        } catch (_) {}
+      }
+
+      if (row == null) {
+        return (user: null, unlockedCosmetics: const <String>[]);
+      }
+
+      final remoteId = (row['id'] as String?)?.trim();
+      final isDesignated = isAdminEmail(current.email);
+      final remoteVerified = row['is_kzynovex_verified'] as bool?;
+      final remoteCredits = (row['credits'] as num?)?.toInt();
+      final remoteRole = row['role'] as String?;
+      final remoteCanUpload = row['can_upload'] as bool?;
+      final remoteRoll = row['roll_no'] as String?;
+      final remoteName = row['name'] as String?;
+      final remoteStreak = (row['streak_count'] as num?)?.toInt();
+
+      final rawUnlocked = row['unlocked_cosmetics'];
+      final unlockedList = rawUnlocked is List
+          ? rawUnlocked.map((e) => e.toString()).toList()
+          : const <String>[];
+
+      final refreshed = current.copyWith(
+        id: (remoteId != null && remoteId.isNotEmpty) ? remoteId : current.id,
+        name: (remoteName != null && remoteName.trim().isNotEmpty)
+            ? remoteName
+            : current.name,
+        rollNo: (remoteRoll != null && remoteRoll.trim().isNotEmpty)
+            ? remoteRoll
+            : current.rollNo,
+        role: isDesignated ? 'admin' : (remoteRole ?? current.role),
+        credits: remoteCredits ?? current.credits,
+        streakCount: remoteStreak ?? current.streakCount,
+        isKzynovexVerified: isDesignated ||
+            current.isKzynovexVerified ||
+            (remoteVerified ?? false),
+        canUpload: isDesignated || (remoteCanUpload ?? current.canUpload),
+      );
+
+      final registry = await _loadRegistry();
+      final key = _findRegistryKey(
+        registry,
+        rollNo: refreshed.rollNo,
+        email: refreshed.email,
+        userId: refreshed.id,
+      );
+      if (key != null && registry[key] != null) {
+        registry[key]!['id'] = refreshed.id;
+        registry[key]!['credits'] = refreshed.credits;
+        registry[key]!['role'] = refreshed.role;
+        registry[key]!['is_kzynovex_verified'] = refreshed.isKzynovexVerified;
+        registry[key]!['can_upload'] = refreshed.canUpload;
+        if (refreshed.rollNo != null && refreshed.rollNo!.isNotEmpty) {
+          registry[key]!['roll_no'] = refreshed.rollNo;
+        }
+        await _saveRegistry(registry);
+      }
+
+      await _saveActiveSession(refreshed);
+      return (user: refreshed, unlockedCosmetics: unlockedList);
+    } catch (e) {
+      debugPrint('fetchFreshProfileFromCloud skipped: $e');
+      return (user: null, unlockedCosmetics: const <String>[]);
+    }
+  }
+
+  /// Applies a bounty escrow or payout credit delta to local registry + active session,
+  /// and attempts cloud sync when Supabase `resolve_bounty_payout` RPC is not yet deployed.
+  Future<bool> applyBountyCreditsFallback({
+    required String targetUserId,
+    required int delta,
+    String? targetRollNo,
+    String? targetName,
+  }) async {
+    if (delta == 0) return true;
+    final normTarget = UuidUtil.fromString(targetUserId);
+
+    // 1. Update local registry so Admin Users list and local sessions stay accurate
+    final registry = await _loadRegistry();
+    String? key = _findRegistryKey(
+      registry,
+      rollNo: targetRollNo,
+      userId: targetUserId,
+    );
+    key ??= _findRegistryKey(registry, userId: normTarget);
+    if (key == null && targetName != null && targetName.trim().isNotEmpty) {
+      final needle = targetName.trim().toLowerCase();
+      for (final entry in registry.entries) {
+        final recName = (entry.value['name'] as String? ?? '').trim().toLowerCase();
+        if (recName == needle) {
+          key = entry.key;
+          break;
+        }
+      }
+    }
+
+    if (key != null && registry[key] != null) {
+      final currentCredits = (registry[key]!['credits'] as num?)?.toInt() ?? 50;
+      registry[key]!['credits'] = (currentCredits + delta).clamp(0, 999999);
+      await _saveRegistry(registry);
+    }
+
+    // 2. Keep active session updated if it belongs to targetUserId
+    final session = await getActiveSession();
+    if (session != null && UuidUtil.fromString(session.id) == normTarget) {
+      final nextCredits = (session.credits + delta).clamp(0, 999999);
+      await _saveActiveSession(session.copyWith(credits: nextCredits));
+    }
+
+    // 3. Fallback cloud update if Supabase is configured (in bounded RPC chunks)
+    if (_isSupabaseActive && targetUserId.trim().isNotEmpty) {
+      try {
+        final client = Supabase.instance.client;
+        int remaining = delta.abs();
+        final stepMax = delta > 0 ? 50 : 20;
+        final sign = delta > 0 ? 1 : -1;
+        while (remaining > 0) {
+          final chunk = (remaining > stepMax ? stepMax : remaining) * sign;
+          await client.rpc('adjust_resource_credits', params: {
+            'p_user_id': normTarget,
+            'p_delta': chunk,
+          }).timeout(const Duration(seconds: 6));
+          remaining -= chunk.abs();
+        }
+        return true;
+      } catch (e) {
+        debugPrint('applyBountyCreditsFallback RPC skipped: $e');
+        if (delta > 0) {
+          try {
+            final client = Supabase.instance.client;
+            final rows = await client
+                .from('users')
+                .select('id, credits')
+                .eq('id', normTarget)
+                .limit(1)
+                .timeout(const Duration(seconds: 4));
+            if ((rows as List).isNotEmpty) {
+              final cur =
+                  ((rows.first as Map)['credits'] as num?)?.toInt() ?? 0;
+              await client
+                  .from('users')
+                  .update({'credits': cur + delta})
+                  .eq('id', normTarget)
+                  .timeout(const Duration(seconds: 4));
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    return key != null;
+  }
+
+  /// Claims quiz credits atomically on Supabase per `(user_id, quiz_id)` so
+  /// reinstalling or clearing storage cannot re-farm credits from the same quiz.
+  /// Returns server-awarded delta, or null when offline / unmigrated.
+  Future<int?> claimQuizCreditsRemote({
+    required String userId,
+    required String quizId,
+    required int score,
+    required int totalQuestions,
+  }) async {
+    if (!_isSupabaseActive || quizId.trim().isEmpty || totalQuestions <= 0) {
+      return null;
+    }
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'claim_quiz_credits',
+        params: {
+          'p_user_id': UuidUtil.fromString(userId),
+          'p_quiz_id': quizId.trim(),
+          'p_score': score,
+          'p_total_questions': totalQuestions,
+        },
+      ).timeout(const Duration(seconds: 6));
+      if (res is num) return res.toInt();
+    } catch (e) {
+      debugPrint('claim_quiz_credits RPC fallback: $e');
+    }
+    return null;
+  }
+
+  // ===================================================================
+  // VERIFIED STUDENT BADGE REQUESTS (Anti-Fake Account Protection)
+  // ===================================================================
+
+  Future<List<StudentVerificationRequestModel>>
+      getStudentVerificationRequests() async {
+    final mapById = <String, StudentVerificationRequestModel>{};
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_keyStudentVerifications);
+      if (raw != null && raw.isNotEmpty) {
+        final list = jsonDecode(raw) as List<dynamic>;
+        for (final e in list) {
+          final req = StudentVerificationRequestModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          );
+          if (req.id.isNotEmpty) mapById[req.id] = req;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading local student verification requests: $e');
+    }
+
+    if (_isSupabaseActive) {
+      try {
+        final client = Supabase.instance.client;
+        bool fetchedTable = false;
+        try {
+          final rows = await client
+              .from('student_verification_requests')
+              .select()
+              .timeout(const Duration(seconds: 5));
+          for (final raw in (rows as List)) {
+            if (raw is Map<String, dynamic>) {
+              final req = StudentVerificationRequestModel.fromMap(raw);
+              if (req.id.isNotEmpty) mapById[req.id] = req;
+            }
+          }
+          fetchedTable = true;
+        } catch (_) {}
+
+        if (!fetchedTable) {
+          final rows = await client
+              .from('resources')
+              .select()
+              .like('url', '${StudentVerificationRequestModel.resourceUrlPrefix}%')
+              .timeout(const Duration(seconds: 5));
+          for (final raw in (rows as List)) {
+            if (raw is Map<String, dynamic>) {
+              final req =
+                  StudentVerificationRequestModel.tryFromResourceMap(raw);
+              if (req != null && req.id.isNotEmpty) mapById[req.id] = req;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Supabase student verification fetch skipped: $e');
+      }
+    }
+
+    final items = mapById.values.toList()
+      ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+    await _saveStudentVerificationRequests(items);
+    return items;
+  }
+
+  Future<void> _saveStudentVerificationRequests(
+    List<StudentVerificationRequestModel> requests,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _keyStudentVerifications,
+        jsonEncode(requests.map((r) => r.toMap()).toList()),
+      );
+    } catch (e) {
+      debugPrint('Error saving student verification requests: $e');
+    }
+  }
+
+  Future<void> _syncStudentVerificationRequestRemote(
+    StudentVerificationRequestModel req,
+  ) async {
+    if (!_isSupabaseActive) return;
+    final client = Supabase.instance.client;
+    try {
+      await client.from('student_verification_requests').upsert({
+        'id': UuidUtil.fromString(req.id),
+        'user_id': UuidUtil.fromString(req.userId),
+        'email': req.email,
+        'name': req.name,
+        'roll_no': req.rollNo,
+        'status': req.status,
+        'rejection_reason': req.rejectionReason,
+        'reviewed_by': req.reviewedBy,
+        'reviewed_at': req.reviewedAt?.toIso8601String(),
+        'submitted_at': req.submittedAt.toIso8601String(),
+      }).timeout(const Duration(seconds: 6));
+      return;
+    } catch (_) {}
+
+    try {
+      final payload = req.toResourcePayload();
+      payload['id'] = UuidUtil.fromString(req.id);
+      payload.remove('uploader_id');
+      await client
+          .from('resources')
+          .upsert(payload)
+          .timeout(const Duration(seconds: 6));
+    } catch (e) {
+      debugPrint('Fallback student verification resource sync skipped: $e');
+    }
+  }
+
+  Future<AuthResult> submitStudentVerificationRequest({
+    required String userId,
+    required String email,
+    required String name,
+    required String rollNo,
+  }) async {
+    final cleanEmail = email.trim().toLowerCase();
+    final cleanRoll = _normalizeRoll(rollNo);
+    final cleanName = name.trim();
+
+    if (cleanName.length < 2) {
+      return const AuthResult(
+        success: false,
+        message: 'Please enter your full university name.',
+      );
+    }
+    if (cleanRoll.length < 3) {
+      return const AuthResult(
+        success: false,
+        message: 'Please enter a valid academic Roll Number (e.g. 23-SE-402).',
+      );
+    }
+
+    final requests = List<StudentVerificationRequestModel>.from(
+        await getStudentVerificationRequests());
+    final normUid = UuidUtil.fromString(userId);
+    final existingIdx = requests.indexWhere(
+      (r) =>
+          (r.userId.isNotEmpty && UuidUtil.fromString(r.userId) == normUid) ||
+          (cleanEmail.isNotEmpty && r.email.toLowerCase() == cleanEmail),
+    );
+
+    if (existingIdx != -1) {
+      final existing = requests[existingIdx];
+      if (existing.isPending) {
+        return const AuthResult(
+          success: false,
+          message:
+              'Your Student Badge verification request is already pending admin review.',
+        );
+      }
+      if (existing.isApproved) {
+        return const AuthResult(
+          success: false,
+          message: 'Your account already has the Verified Student Badge!',
+        );
+      }
+      // Replace previously rejected request so student can resubmit corrected info
+      requests.removeAt(existingIdx);
+    }
+
+    final newReq = StudentVerificationRequestModel(
+      id: UuidUtil.generate(),
+      userId: userId.isNotEmpty ? UuidUtil.fromString(userId) : UuidUtil.generate(),
+      email: cleanEmail.isNotEmpty ? cleanEmail : '$cleanRoll@campus.edu',
+      name: cleanName,
+      rollNo: cleanRoll,
+      status: 'pending',
+      submittedAt: DateTime.now(),
+    );
+
+    requests.insert(0, newReq);
+    await _saveStudentVerificationRequests(requests);
+    await _syncStudentVerificationRequestRemote(newReq);
+
+    return const AuthResult(
+      success: true,
+      message:
+          'Verification request submitted! An admin will verify your Name & Roll No.',
+    );
+  }
+
+  Future<bool> approveStudentVerificationRequest(
+    String requestId, {
+    required String adminId,
+    String? adminEmail,
+  }) async {
+    final requests = List<StudentVerificationRequestModel>.from(
+        await getStudentVerificationRequests());
+    final idx = requests.indexWhere((r) => r.id == requestId);
+    if (idx == -1) return false;
+
+    final req = requests[idx];
+    final updated = req.copyWith(
+      status: 'approved',
+      reviewedAt: DateTime.now(),
+      reviewedBy: adminEmail ?? 'Admin',
+    );
+    requests[idx] = updated;
+    await _saveStudentVerificationRequests(requests);
+
+    // Update local registry & active session if matching
+    final registry = await _loadRegistry();
+    final regKey = _findRegistryKey(
+      registry,
+      rollNo: req.rollNo,
+      email: req.email,
+      userId: req.userId,
+    );
+    if (regKey != null && registry[regKey] != null) {
+      registry[regKey]!['is_kzynovex_verified'] = true;
+      registry[regKey]!['name'] = req.name;
+      registry[regKey]!['roll_no'] = req.rollNo;
+      await _saveRegistry(registry);
+    }
+
+    final session = await getActiveSession();
+    if (session != null &&
+        (UuidUtil.fromString(session.id) == UuidUtil.fromString(req.userId) ||
+            (req.email.isNotEmpty &&
+                session.email.toLowerCase() == req.email.toLowerCase()))) {
+      await _saveActiveSession(
+        session.copyWith(
+          isKzynovexVerified: true,
+          name: req.name,
+          rollNo: req.rollNo,
+        ),
+      );
+    }
+
+    bool usedRpc = false;
+    if (_isSupabaseActive) {
+      try {
+        await Supabase.instance.client.rpc(
+          'admin_review_student_verification',
+          params: {
+            'p_request_id': UuidUtil.fromString(req.id),
+            'p_admin_id': UuidUtil.fromString(adminId),
+            'p_approve': true,
+            'p_reason': null,
+          },
+        ).timeout(const Duration(seconds: 6));
+        usedRpc = true;
+      } catch (e) {
+        debugPrint('admin_review_student_verification RPC fallback: $e');
+      }
+    }
+    if (!usedRpc) {
+      await _syncStudentVerificationRequestRemote(updated);
+      if (regKey != null && registry[regKey] != null) {
+        final target = UserModel.fromMap(registry[regKey]!);
+        await adminUpdateUser(target);
+      }
+    }
+    return true;
+  }
+
+  Future<bool> rejectStudentVerificationRequest(
+    String requestId, {
+    required String adminId,
+    String? reason,
+    String? adminEmail,
+  }) async {
+    final requests = List<StudentVerificationRequestModel>.from(
+        await getStudentVerificationRequests());
+    final idx = requests.indexWhere((r) => r.id == requestId);
+    if (idx == -1) return false;
+
+    final req = requests[idx];
+    final cleanReason = (reason != null && reason.trim().isNotEmpty)
+        ? reason.trim()
+        : 'Name and Roll Number could not be matched with class roster.';
+    final updated = req.copyWith(
+      status: 'rejected',
+      rejectionReason: cleanReason,
+      reviewedAt: DateTime.now(),
+      reviewedBy: adminEmail ?? 'Admin',
+    );
+    requests[idx] = updated;
+    await _saveStudentVerificationRequests(requests);
+
+    bool usedRpc = false;
+    if (_isSupabaseActive) {
+      try {
+        await Supabase.instance.client.rpc(
+          'admin_review_student_verification',
+          params: {
+            'p_request_id': UuidUtil.fromString(req.id),
+            'p_admin_id': UuidUtil.fromString(adminId),
+            'p_approve': false,
+            'p_reason': cleanReason,
+          },
+        ).timeout(const Duration(seconds: 6));
+        usedRpc = true;
+      } catch (e) {
+        debugPrint('admin_review_student_verification reject fallback: $e');
+      }
+    }
+    if (!usedRpc) {
+      await _syncStudentVerificationRequestRemote(updated);
+    }
     return true;
   }
 }

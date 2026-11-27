@@ -181,19 +181,7 @@ class ClassRepository {
 
   static List<QuizModel> get mockQuizzes => const [];
 
-  static Map<String, AttendanceRecord> get initialAttendance {
-    return {
-      '11111111-1111-1111-1111-111111111111': const AttendanceRecord(subjectId: '11111111-1111-1111-1111-111111111111', attended: 19, total: 22), // 86.3%
-      '22222222-2222-2222-2222-222222222222': const AttendanceRecord(subjectId: '22222222-2222-2222-2222-222222222222', attended: 14, total: 20), // 70.0% (Danger)
-      '33333333-3333-3333-3333-333333333333': const AttendanceRecord(subjectId: '33333333-3333-3333-3333-333333333333', attended: 21, total: 24), // 87.5%
-      '44444444-4444-4444-4444-444444444444': const AttendanceRecord(subjectId: '44444444-4444-4444-4444-444444444444', attended: 17, total: 21), // 80.9%
-      // Backwards compatibility with sub-1..sub-4
-      'sub-1': const AttendanceRecord(subjectId: '11111111-1111-1111-1111-111111111111', attended: 19, total: 22),
-      'sub-2': const AttendanceRecord(subjectId: '22222222-2222-2222-2222-222222222222', attended: 14, total: 20),
-      'sub-3': const AttendanceRecord(subjectId: '33333333-3333-3333-3333-333333333333', attended: 21, total: 24),
-      'sub-4': const AttendanceRecord(subjectId: '44444444-4444-4444-4444-444444444444', attended: 17, total: 21),
-    };
-  }
+  static Map<String, AttendanceRecord> get initialAttendance => const {};
 
   // ===================================================================
   // LOCAL CACHING & OFFLINE-FIRST PERSISTENCE (SharedPreferences)
@@ -206,6 +194,11 @@ class ClassRepository {
   static const String _keyResources = 'cached_admin_resources';
   static const String _keyAssignments = 'cached_admin_assignments';
   static const String _keyQuizzes = 'cached_admin_quizzes';
+  static const String _keyBounties = 'cached_note_bounties_v1';
+  static const String keyTimetableImg = 'key_official_timetable_image_url_v2';
+  static const String timetableImageUrlPrefix = 'cctimetable://';
+  static final String timetableImageResourceId =
+      UuidUtil.fromString('official_timetable_sheet_image_v1');
 
   // Synchronous In-Memory Cache (Avoids async flash of mock data)
   static List<SubjectModel>? memorySubjects;
@@ -214,6 +207,8 @@ class ClassRepository {
   static List<ResourceModel>? memoryResources;
   static List<AssignmentModel>? memoryAssignments;
   static List<QuizModel>? memoryQuizzes;
+  static List<NoteBountyModel>? memoryBounties;
+  static String? memoryTimetableImageUrl;
   static bool hasPreloaded = false;
 
   /// Preloads cached state into memory at app startup before widgets build
@@ -275,6 +270,16 @@ class ClassRepository {
             .map((m) => QuizModel.fromMap(m as Map<String, dynamic>))
             .toList();
       }
+
+      final bountyJson = prefs.getString(_keyBounties);
+      if (bountyJson != null) {
+        final list = jsonDecode(bountyJson) as List;
+        memoryBounties = list
+            .map((m) => NoteBountyModel.fromMap(m as Map<String, dynamic>))
+            .toList();
+      }
+
+      memoryTimetableImageUrl = prefs.getString(keyTimetableImg);
 
       hasPreloaded = true;
     } catch (e) {
@@ -517,15 +522,156 @@ class ClassRepository {
           .timeout(const Duration(seconds: 8));
       return (rows as List)
           .whereType<Map<String, dynamic>>()
-          .where(
-            (r) => !(r['url'] as String? ?? '')
-                .startsWith(QuizModel.resourceUrlPrefix),
-          )
+          .where((r) {
+            final url = r['url'] as String? ?? '';
+            return !url.startsWith(QuizModel.resourceUrlPrefix) &&
+                !url.startsWith(
+                    StudentVerificationRequestModel.resourceUrlPrefix) &&
+                !url.startsWith(NoteBountyModel.resourceUrlPrefix) &&
+                !url.startsWith(timetableImageUrlPrefix);
+          })
           .map((r) => ResourceModel.fromMap(r))
           .toList();
     } catch (e) {
       debugPrint('Error fetching resources from Supabase: $e');
       return null;
+    }
+  }
+
+  // ===================================================================
+  // OFFICIAL TIMETABLE IMAGE SYNC (Supabase Cloud + Local Cache)
+  // ===================================================================
+
+  Future<String?> loadCachedTimetableImageUrl() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final url = prefs.getString(keyTimetableImg);
+      memoryTimetableImageUrl = (url != null && url.trim().isNotEmpty) ? url : null;
+      return memoryTimetableImageUrl;
+    } catch (e) {
+      debugPrint('Error loading cached timetable image: $e');
+      return memoryTimetableImageUrl;
+    }
+  }
+
+  Future<void> cacheTimetableImageUrl(String? url) async {
+    final clean = (url != null && url.trim().isNotEmpty) ? url.trim() : null;
+    memoryTimetableImageUrl = clean;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (clean == null) {
+        await prefs.remove(keyTimetableImg);
+      } else {
+        await prefs.setString(keyTimetableImg, clean);
+      }
+    } catch (e) {
+      debugPrint('Error caching timetable image: $e');
+    }
+  }
+
+  Future<({bool fetched, String? url})> fetchOfficialTimetableImageUrl() async {
+    if (!isLiveSupabase) return (fetched: false, url: null);
+    try {
+      Map<String, dynamic>? row = await client!
+          .from('resources')
+          .select('url')
+          .eq('id', timetableImageResourceId)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 8));
+      if (row == null) {
+        final rows = await client!
+            .from('resources')
+            .select('url')
+            .like('url', '$timetableImageUrlPrefix%')
+            .limit(1)
+            .timeout(const Duration(seconds: 8));
+        if (rows.isNotEmpty) {
+          row = rows.first;
+        }
+      }
+      if (row == null) {
+        return (fetched: true, url: null);
+      }
+      final rawUrl = row['url']?.toString() ?? '';
+      if (!rawUrl.startsWith(timetableImageUrlPrefix)) {
+        return (fetched: true, url: null);
+      }
+      final clean = rawUrl.substring(timetableImageUrlPrefix.length).trim();
+      return (fetched: true, url: clean.isEmpty ? null : clean);
+    } catch (e) {
+      debugPrint('Error fetching official timetable image: $e');
+      return (fetched: false, url: null);
+    }
+  }
+
+  Future<String?> saveOfficialTimetableImageUrl(
+    String displayUrl, {
+    SubjectModel? fallbackSubject,
+  }) async {
+    if (!isLiveSupabase) {
+      return 'Supabase is not configured, saved on this device only.';
+    }
+    final cleanUrl = displayUrl.trim();
+    if (cleanUrl.isEmpty) {
+      return clearOfficialTimetableImageUrl();
+    }
+    try {
+      final targetSub = fallbackSubject ?? mockSubjects.first;
+      final subjectId = UuidUtil.fromString(targetSub.id);
+      final payload = <String, dynamic>{
+        'id': timetableImageResourceId,
+        'subject_id': subjectId,
+        'date': DateTime.now().toIso8601String().substring(0, 10),
+        'uploader_name': 'Admin',
+        'title': 'Official Class Timetable Sheet',
+        'type': 'image',
+        'url': '$timetableImageUrlPrefix$cleanUrl',
+        'upvotes': 0,
+        'cost_credits': 0,
+        'is_approved': true,
+      };
+      try {
+        await client!
+            .from('resources')
+            .upsert(payload)
+            .timeout(const Duration(seconds: 8));
+        return null;
+      } catch (e) {
+        final s = e.toString().toLowerCase();
+        if ((s.contains('23503') || s.contains('foreign key')) &&
+            s.contains('subject')) {
+          final subPayload = Map<String, dynamic>.from(targetSub.toMap());
+          subPayload['id'] = subjectId;
+          await client!
+              .from('subjects')
+              .upsert(subPayload)
+              .timeout(const Duration(seconds: 8));
+          await client!
+              .from('resources')
+              .upsert(payload)
+              .timeout(const Duration(seconds: 8));
+          return null;
+        }
+        rethrow;
+      }
+    } catch (e) {
+      debugPrint('Error saving official timetable image in Supabase: $e');
+      return _friendlyDbError(e);
+    }
+  }
+
+  Future<String?> clearOfficialTimetableImageUrl() async {
+    if (!isLiveSupabase) return null;
+    try {
+      await client!
+          .from('resources')
+          .delete()
+          .eq('id', timetableImageResourceId)
+          .timeout(const Duration(seconds: 8));
+      return null;
+    } catch (e) {
+      debugPrint('Error deleting official timetable image in Supabase: $e');
+      return _friendlyDbError(e);
     }
   }
 
@@ -612,6 +758,188 @@ class ClassRepository {
     } catch (e) {
       debugPrint('Error deleting quiz in Supabase: $e');
       return _friendlyDbError(e);
+    }
+  }
+
+  // ===================================================================
+  // NOTE BOUNTIES (Dedicated Table + RPC with ccbounty:// Fallback)
+  // ===================================================================
+
+  Future<List<NoteBountyModel>?> loadCachedBounties() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString(_keyBounties);
+      if (jsonStr != null) {
+        final list = jsonDecode(jsonStr) as List;
+        final loaded = list
+            .map((m) => NoteBountyModel.fromMap(m as Map<String, dynamic>))
+            .toList();
+        memoryBounties = loaded;
+        return loaded;
+      }
+    } catch (e) {
+      debugPrint('Error loading cached bounties: $e');
+    }
+    return memoryBounties;
+  }
+
+  Future<void> cacheBounties(List<NoteBountyModel> bounties) async {
+    memoryBounties = bounties;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(bounties.map((b) => b.toMap()).toList());
+      await prefs.setString(_keyBounties, jsonStr);
+    } catch (e) {
+      debugPrint('Error caching bounties: $e');
+    }
+  }
+
+  Future<List<NoteBountyModel>?> fetchNoteBounties() async {
+    if (!isLiveSupabase) return null;
+    try {
+      final rows = await client!
+          .from('note_bounties')
+          .select()
+          .timeout(const Duration(seconds: 8));
+      final list = (rows as List)
+          .whereType<Map<String, dynamic>>()
+          .map(NoteBountyModel.fromMap)
+          .toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (_) {
+      // Fallback to zero-migration ccbounty:// rows in public.resources
+      try {
+        final rows = await client!
+            .from('resources')
+            .select()
+            .like('url', '${NoteBountyModel.resourceUrlPrefix}%')
+            .timeout(const Duration(seconds: 8));
+        final list = <NoteBountyModel>[];
+        for (final raw in (rows as List)) {
+          if (raw is Map<String, dynamic>) {
+            final parsed = NoteBountyModel.tryFromResourceMap(raw);
+            if (parsed != null) list.add(parsed);
+          }
+        }
+        list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return list;
+      } catch (e) {
+        debugPrint('Error fetching note bounties from Supabase: $e');
+        return null;
+      }
+    }
+  }
+
+  Future<void> _saveBountyResourceFallback(NoteBountyModel bounty) async {
+    if (!isLiveSupabase) return;
+    try {
+      final payload = bounty.toResourcePayload();
+      payload['id'] = UuidUtil.fromString(bounty.id);
+      payload['subject_id'] = UuidUtil.fromString(
+        bounty.subjectId.isNotEmpty
+            ? bounty.subjectId
+            : '11111111-1111-1111-1111-111111111111',
+      );
+      payload.remove('uploader_id');
+      await client!
+          .from('resources')
+          .upsert(payload)
+          .timeout(const Duration(seconds: 8));
+    } catch (e) {
+      debugPrint('Fallback bounty resource upsert skipped: $e');
+    }
+  }
+
+  Future<bool> createNoteBountyRemote(NoteBountyModel bounty) async {
+    if (!isLiveSupabase) return false;
+    try {
+      await client!.rpc('create_note_bounty', params: {
+        'p_id': UuidUtil.fromString(bounty.id),
+        'p_requester_id': UuidUtil.fromString(bounty.requesterId),
+        'p_subject_id': bounty.subjectId.isNotEmpty
+            ? UuidUtil.fromString(bounty.subjectId)
+            : null,
+        'p_title': bounty.title,
+        'p_description': bounty.description,
+        'p_reward_credits': bounty.rewardCredits,
+      }).timeout(const Duration(seconds: 8));
+      return true;
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('pgrst202') ||
+          s.contains('42883') ||
+          s.contains('could not find the function')) {
+        await _saveBountyResourceFallback(bounty);
+        return false;
+      }
+      if (e is PostgrestException && e.message.trim().isNotEmpty) {
+        if (e.message.toLowerCase().contains('has no field "roll_no"')) {
+          throw const OverrideSyncException(
+              'Database update required: run supabase_security_fix.sql in your Supabase SQL Editor to add missing roll_no columns.');
+        }
+        throw OverrideSyncException(e.message.trim());
+      }
+      throw OverrideSyncException(_friendlyDbError(e));
+    }
+  }
+
+  Future<bool> submitBountySolutionRemote(NoteBountyModel bounty) async {
+    if (!isLiveSupabase) return false;
+    try {
+      await client!.rpc('submit_bounty_solution', params: {
+        'p_bounty_id': UuidUtil.fromString(bounty.id),
+        'p_helper_id': UuidUtil.fromString(bounty.helperId ?? ''),
+        'p_solution_text': bounty.solutionText ?? '',
+        'p_solution_url': bounty.solutionUrl,
+      }).timeout(const Duration(seconds: 8));
+      return true;
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('pgrst202') ||
+          s.contains('42883') ||
+          s.contains('could not find the function')) {
+        await _saveBountyResourceFallback(bounty);
+        return false;
+      }
+      if (e is PostgrestException && e.message.trim().isNotEmpty) {
+        if (e.message.toLowerCase().contains('has no field "roll_no"')) {
+          throw const OverrideSyncException(
+              'Database update required: run supabase_security_fix.sql in your Supabase SQL Editor to add missing roll_no columns.');
+        }
+        throw OverrideSyncException(e.message.trim());
+      }
+      throw OverrideSyncException(_friendlyDbError(e));
+    }
+  }
+
+  Future<bool> resolveBountyPayoutRemote({
+    required NoteBountyModel updatedBounty,
+    required String actorId,
+    required String action,
+    String? reason,
+  }) async {
+    if (!isLiveSupabase) return false;
+    try {
+      await client!.rpc('resolve_bounty_payout', params: {
+        'p_bounty_id': UuidUtil.fromString(updatedBounty.id),
+        'p_actor_id': UuidUtil.fromString(actorId),
+        'p_action': action,
+        'p_reason': reason,
+      }).timeout(const Duration(seconds: 8));
+      return true;
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('pgrst202') ||
+          s.contains('42883') ||
+          s.contains('could not find the function')) {
+        await _saveBountyResourceFallback(updatedBounty);
+        return false;
+      }
+      if (e is PostgrestException && e.message.trim().isNotEmpty) {
+        throw OverrideSyncException(e.message.trim());
+      }
+      throw OverrideSyncException(_friendlyDbError(e));
     }
   }
 
@@ -758,6 +1086,7 @@ class ClassRepository {
     final origRDate = payload['rescheduled_date']?.toString();
     final origMeetingUrl = payload['meeting_url']?.toString();
     final origTopic = payload['topic_covered']?.toString();
+    final origReporterName = payload['reported_by_name']?.toString();
 
     bool useConflictTarget = true;
     bool droppedOptionalCols = false;
@@ -825,12 +1154,14 @@ class ClassRepository {
             actualEndTime: origEnd,
             rescheduledDate: origRDate,
             meetingUrl: origMeetingUrl,
+            reportedByName: origReporterName,
           );
           payload = Map<String, dynamic>.from(payload)
             ..remove('actual_start_time')
             ..remove('actual_end_time')
             ..remove('rescheduled_date')
-            ..remove('meeting_url');
+            ..remove('meeting_url')
+            ..remove('reported_by_name');
           if (encodedTopic != null) {
             payload['topic_covered'] = encodedTopic;
           }
@@ -845,21 +1176,28 @@ class ClassRepository {
           continue;
         }
 
-        // Duplicate (slot_id, date) row with a different id -> replace it
-        if (!clearedDuplicate &&
-            (s.contains('23505') || s.contains('duplicate key'))) {
-          final slotId = payload['slot_id'];
-          final date = payload['date'];
-          if (slotId != null && date != null) {
-            await client
-                .from('daily_overrides')
-                .delete()
-                .eq('slot_id', slotId)
-                .eq('date', date)
-                .timeout(const Duration(seconds: 8));
+        // Duplicate (slot_id, date) row:
+        // Only admin-approved overrides may replace an existing row;
+        // student reports must fail so they cannot spam or overwrite overrides.
+        if (s.contains('23505') || s.contains('duplicate key')) {
+          if (payload['is_approved'] != true) {
+            throw const OverrideSyncException(
+                'A schedule report for this lecture and date already exists.');
           }
-          clearedDuplicate = true;
-          continue;
+          if (!clearedDuplicate) {
+            final slotId = payload['slot_id'];
+            final date = payload['date'];
+            if (slotId != null && date != null) {
+              await client
+                  .from('daily_overrides')
+                  .delete()
+                  .eq('slot_id', slotId)
+                  .eq('date', date)
+                  .timeout(const Duration(seconds: 8));
+            }
+            clearedDuplicate = true;
+            continue;
+          }
         }
 
         break;
@@ -930,56 +1268,124 @@ class ClassRepository {
     }
   }
 
+  /// Securely approves or rejects a student override via the database RPC
+  /// `admin_review_override` (which awards +30 credits once on approval and
+  /// deletes on rejection). Falls back to direct table write if the RPC has
+  /// not yet been deployed.
+  Future<bool> reviewOverride(
+    String overrideId, {
+    required String adminId,
+    required bool approve,
+    DailyOverrideModel? fallbackOverride,
+  }) async {
+    if (!isLiveSupabase) return false;
+    try {
+      await client!.rpc('admin_review_override', params: {
+        'p_override_id': UuidUtil.fromString(overrideId),
+        'p_admin_id': UuidUtil.fromString(adminId),
+        'p_approve': approve,
+      }).timeout(const Duration(seconds: 8));
+      return true;
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      final missingRpc = s.contains('pgrst202') ||
+          s.contains('42883') ||
+          s.contains('could not find the function');
+      if (missingRpc) {
+        if (approve && fallbackOverride != null) {
+          await saveOverride(fallbackOverride);
+        } else if (!approve) {
+          await deleteOverride(overrideId);
+        }
+      } else {
+        debugPrint('Error reviewing override via RPC: $e');
+      }
+      return false;
+    }
+  }
+
+  /// Shared self-healing upsert for `public.resources` used by both live writes
+  /// and [SyncService]. Falls back cleanly if the DB check constraint hasn't
+  /// been migrated yet to include `'notes'` / `'folder'`.
+  static Future<void> upsertResourceRow(
+    SupabaseClient client,
+    Map<String, dynamic> raw, {
+    String? fallbackId,
+    SubjectModel? subject,
+  }) async {
+    var payload = Map<String, dynamic>.from(raw);
+    payload['id'] =
+        UuidUtil.fromString(payload['id']?.toString() ?? fallbackId ?? '');
+    if (payload['subject_id'] != null) {
+      payload['subject_id'] =
+          UuidUtil.fromString(payload['subject_id'].toString());
+    }
+    if (payload['uploader_id'] != null &&
+        !UuidUtil.isValidUuid(payload['uploader_id'].toString())) {
+      payload.remove('uploader_id');
+    }
+
+    bool ensuredSubject = false;
+    bool downgradedCategoryType = false;
+    final origTitle = payload['title']?.toString() ?? '';
+    final origType = ResourceType.fromString(payload['type']?.toString() ?? 'pdf');
+
+    for (int attempt = 0; attempt < 4; attempt++) {
+      try {
+        await client
+            .from('resources')
+            .upsert(payload)
+            .timeout(const Duration(seconds: 8));
+        return;
+      } catch (e) {
+        final s = e.toString().toLowerCase();
+        final isFk = s.contains('23503') || s.contains('foreign key');
+        if (isFk &&
+            payload.containsKey('uploader_id') &&
+            (s.contains('uploader_id') || s.contains('users'))) {
+          payload = Map<String, dynamic>.from(payload)..remove('uploader_id');
+          continue;
+        }
+        if (isFk && s.contains('subject') && !ensuredSubject && subject != null) {
+          ensuredSubject = true;
+          try {
+            final subPayload = Map<String, dynamic>.from(subject.toMap());
+            subPayload['id'] = UuidUtil.fromString(subject.id);
+            await client
+                .from('subjects')
+                .upsert(subPayload)
+                .timeout(const Duration(seconds: 8));
+            continue;
+          } catch (_) {}
+        }
+        if (!downgradedCategoryType &&
+            (origType == ResourceType.notes || origType == ResourceType.folder) &&
+            (s.contains('23514') ||
+                s.contains('resources_type_check') ||
+                s.contains('check constraint'))) {
+          payload = Map<String, dynamic>.from(payload)
+            ..['type'] = 'pdf'
+            ..['title'] = ResourceModel.encodeFallbackTitle(origTitle, origType);
+          downgradedCategoryType = true;
+          continue;
+        }
+        rethrow;
+      }
+    }
+  }
+
   Future<void> saveResource(
     ResourceModel resource, {
     SubjectModel? subject,
   }) async {
     if (!isLiveSupabase) return;
     try {
-      var payload = Map<String, dynamic>.from(resource.toMap());
-      payload['id'] =
-          UuidUtil.fromString(payload['id']?.toString() ?? resource.id);
-      if (payload['subject_id'] != null) {
-        payload['subject_id'] =
-            UuidUtil.fromString(payload['subject_id'].toString());
-      }
-      if (payload['uploader_id'] != null &&
-          !UuidUtil.isValidUuid(payload['uploader_id'].toString())) {
-        payload.remove('uploader_id');
-      }
-
-      bool ensuredSubject = false;
-      for (int attempt = 0; attempt < 3; attempt++) {
-        try {
-          await client!
-              .from('resources')
-              .upsert(payload)
-              .timeout(const Duration(seconds: 8));
-          return;
-        } catch (e) {
-          final s = e.toString().toLowerCase();
-          final isFk = s.contains('23503') || s.contains('foreign key');
-          if (isFk &&
-              payload.containsKey('uploader_id') &&
-              (s.contains('uploader_id') || s.contains('users'))) {
-            payload = Map<String, dynamic>.from(payload)..remove('uploader_id');
-            continue;
-          }
-          if (isFk && s.contains('subject') && !ensuredSubject && subject != null) {
-            ensuredSubject = true;
-            try {
-              final subPayload = Map<String, dynamic>.from(subject.toMap());
-              subPayload['id'] = UuidUtil.fromString(subject.id);
-              await client!
-                  .from('subjects')
-                  .upsert(subPayload)
-                  .timeout(const Duration(seconds: 8));
-              continue;
-            } catch (_) {}
-          }
-          rethrow;
-        }
-      }
+      await upsertResourceRow(
+        client!,
+        resource.toMap(),
+        fallbackId: resource.id,
+        subject: subject,
+      );
     } catch (e) {
       debugPrint('Error saving resource in Supabase: $e');
     }
@@ -1018,14 +1424,16 @@ class ClassRepository {
     }
   }
 
-  /// Upserts an assignment row. Returns null on success, or an error message.
+  /// Upserts an assignment/task row. Returns normally on success, or throws
+  /// [OverrideSyncException]. Self-heals missing `category` column by encoding
+  /// `[TASK:quiz]` / `[TASK:presentation]` into `description`.
   static Future<void> upsertAssignmentRow(
     SupabaseClient client,
     Map<String, dynamic> raw, {
     String? fallbackId,
     SubjectModel? subject,
   }) async {
-    final payload = Map<String, dynamic>.from(raw);
+    var payload = Map<String, dynamic>.from(raw);
     payload['id'] =
         UuidUtil.fromString(payload['id']?.toString() ?? fallbackId ?? '');
     if (payload['subject_id'] != null &&
@@ -1035,35 +1443,59 @@ class ClassRepository {
     } else {
       payload.remove('subject_id');
     }
-    try {
-      await client
-          .from('assignments')
-          .upsert(payload)
-          .timeout(const Duration(seconds: 8));
-    } catch (e) {
-      final s = e.toString().toLowerCase();
-      if ((s.contains('23503') || s.contains('foreign key')) &&
-          s.contains('subject')) {
-        if (subject != null) {
-          try {
-            final subPayload = Map<String, dynamic>.from(subject.toMap());
-            subPayload['id'] = UuidUtil.fromString(subject.id);
-            await client
-                .from('subjects')
-                .upsert(subPayload)
-                .timeout(const Duration(seconds: 8));
-            await client
-                .from('assignments')
-                .upsert(payload)
-                .timeout(const Duration(seconds: 8));
-            return;
-          } catch (_) {}
+
+    final origDesc = payload['description']?.toString() ?? '';
+    final taskCat =
+        TaskCategory.fromString(payload['category']?.toString());
+    bool ensuredSubject = false;
+    bool droppedCategoryCol = false;
+    Object? lastError;
+
+    for (int attempt = 0; attempt < 4; attempt++) {
+      try {
+        await client
+            .from('assignments')
+            .upsert(payload)
+            .timeout(const Duration(seconds: 8));
+        return;
+      } catch (e) {
+        lastError = e;
+        final s = e.toString().toLowerCase();
+
+        if (!droppedCategoryCol &&
+            payload.containsKey('category') &&
+            (s.contains('pgrst204') ||
+                s.contains('42703') ||
+                (s.contains('column') && s.contains('category')))) {
+          payload = Map<String, dynamic>.from(payload)..remove('category');
+          payload['description'] =
+              AssignmentModel.encodeCategoryInDescription(origDesc, taskCat);
+          droppedCategoryCol = true;
+          continue;
         }
-        throw const OverrideSyncException(
-            'This course is not in the cloud yet. Push your courses first, then post the assignment again.');
+
+        if (!ensuredSubject &&
+            (s.contains('23503') || s.contains('foreign key')) &&
+            s.contains('subject')) {
+          if (subject != null) {
+            ensuredSubject = true;
+            try {
+              final subPayload = Map<String, dynamic>.from(subject.toMap());
+              subPayload['id'] = UuidUtil.fromString(subject.id);
+              await client
+                  .from('subjects')
+                  .upsert(subPayload)
+                  .timeout(const Duration(seconds: 8));
+              continue;
+            } catch (_) {}
+          }
+          throw const OverrideSyncException(
+              'This course is not in the cloud yet. Push your courses first, then post the task again.');
+        }
+        break;
       }
-      throw OverrideSyncException(_friendlyDbError(e));
     }
+    throw OverrideSyncException(_friendlyDbError(lastError));
   }
 
   Future<String?> saveAssignment(

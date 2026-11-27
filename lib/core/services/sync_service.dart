@@ -296,40 +296,39 @@ class SyncService {
 
           case 'resource':
             if (mutation.action == 'upsert' && mutation.payload != null) {
-              final payload = Map<String, dynamic>.from(mutation.payload!);
-              payload['id'] = UuidUtil.fromString(payload['id']?.toString() ?? mutation.id);
-              if (payload['subject_id'] != null) {
-                final subId = UuidUtil.fromString(payload['subject_id'].toString());
-                payload['subject_id'] = subId;
-                final parentSub = subjectById[subId];
-                if (parentSub != null) {
-                  final subPayload = parentSub.toMap();
-                  subPayload['id'] = subId;
-                  try {
-                    await _withTimeout(client!.from('subjects').upsert(subPayload));
-                  } catch (_) {}
-                }
-              }
-              if (payload['uploader_id'] != null && !UuidUtil.isValidUuid(payload['uploader_id'].toString())) {
-                payload.remove('uploader_id');
-              }
-              try {
-                await _withTimeout(client!.from('resources').upsert(payload));
-              } catch (e) {
-                final s = e.toString().toLowerCase();
-                if ((s.contains('23503') || s.contains('foreign key')) &&
-                    payload.containsKey('uploader_id')) {
-                  payload.remove('uploader_id');
-                  await _withTimeout(client!.from('resources').upsert(payload));
-                } else {
-                  rethrow;
-                }
-              }
+              final rawSubId = mutation.payload!['subject_id']?.toString();
+              final parentSub = rawSubId != null
+                  ? subjectById[UuidUtil.fromString(rawSubId)]
+                  : null;
+              await _withTimeout(ClassRepository.upsertResourceRow(
+                client!,
+                mutation.payload!,
+                fallbackId: mutation.id,
+                subject: parentSub,
+              ));
               success = true;
             } else if (mutation.action == 'delete') {
               final id = UuidUtil.fromString(mutation.id);
               await _withTimeout(client!.from('resources').delete().eq('id', id));
               success = true;
+            }
+            break;
+
+          case 'timetable_image':
+            if (mutation.action == 'upsert') {
+              final url = mutation.payload?['url']?.toString() ?? '';
+              final err = await _withTimeout(
+                repository.saveOfficialTimetableImageUrl(
+                  url,
+                  fallbackSubject: localSubjects.firstOrNull,
+                ),
+              );
+              success = err == null;
+            } else if (mutation.action == 'delete') {
+              final err = await _withTimeout(
+                repository.clearOfficialTimetableImageUrl(),
+              );
+              success = err == null;
             }
             break;
         }
@@ -382,6 +381,12 @@ class SyncService {
       final remoteQuizzes = await _withTimeout(repository.fetchQuizzes());
       if (remoteQuizzes != null) {
         await repository.cacheQuizzes(remoteQuizzes);
+      }
+
+      final remoteTimetable =
+          await _withTimeout(repository.fetchOfficialTimetableImageUrl());
+      if (remoteTimetable.fetched) {
+        await repository.cacheTimetableImageUrl(remoteTimetable.url);
       }
 
       if (remainingFailed.isEmpty) {

@@ -6,7 +6,9 @@ import '../../core/utils/formatters.dart';
 import '../../core/utils/uuid_util.dart';
 import '../../models/models.dart';
 import '../../providers/class_providers.dart';
+import '../bounties/note_bounties_screen.dart';
 import '../quizzes/quiz_center_screen.dart';
+import '../vault/vault_screen.dart';
 
 class AdminManagementScreen extends ConsumerStatefulWidget {
   final int initialTabIndex;
@@ -28,6 +30,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
   String _uploaderReqFilter = 'all'; // 'all', 'pending', 'approved', 'rejected'
   String _uploaderReqSearch = '';
   final TextEditingController _uploaderSearchCtrl = TextEditingController();
+  String _vaultSearchQuery = '';
+  final TextEditingController _vaultSearchCtrl = TextEditingController();
 
   static const List<Map<String, dynamic>> _days = [
     {'day': 1, 'label': 'Mon', 'fullName': 'Monday'},
@@ -69,11 +73,13 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     _tabController.dispose();
     _userSearchCtrl.dispose();
     _uploaderSearchCtrl.dispose();
+    _vaultSearchCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context);
     final slots = ref.watch(timetableSlotsProvider);
     final subjects = ref.watch(subjectsProvider);
     final overrides = ref.watch(dailyOverridesProvider);
@@ -83,6 +89,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     final users = ref.watch(usersListProvider);
     final uploaderRequests = ref.watch(uploaderRequestsProvider);
     final pendingReqCount = ref.watch(pendingUploaderRequestsCountProvider);
+    final studentVerifications = ref.watch(studentVerificationRequestsProvider);
+    final pendingStudentVerifCount =
+        ref.watch(pendingStudentVerificationsCountProvider);
+    final bounties = ref.watch(noteBountiesProvider);
+    final bountyReviewCount = ref.watch(pendingBountyDisputesCountProvider);
     final quizzes = ref.watch(quizzesProvider);
 
     return Scaffold(
@@ -98,7 +109,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 ? '${syncState.pendingCount} unsynced changes. Tap to sync.'
                 : 'Cloud in sync. Tap to refresh.',
             icon: syncState.isSyncing
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
@@ -131,7 +142,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         SnackBar(
                           content: Text(res.message),
                           backgroundColor: res.success
-                              ? AppColors.textPrimary
+                              ? AppColors.snackBarBg
                               : AppColors.danger,
                           behavior: SnackBarBehavior.floating,
                         ),
@@ -141,16 +152,16 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           ),
           IconButton(
             tooltip: 'Student PIN Reset & Security',
-            icon: const Icon(Icons.lock_reset_rounded, color: AppColors.primary),
+            icon: Icon(Icons.lock_reset_rounded, color: AppColors.primary),
             onPressed: () => _openSecurityManagement(context),
           ),
           Container(
             margin: const EdgeInsets.only(right: 16),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFFEF3C7),
+              color: AppColors.warningBg,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: const Color(0xFFFDE68A)),
+              border: Border.all(color: AppColors.warningBorder),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -173,7 +184,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
           child: Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
             child: TabBar(
@@ -222,7 +233,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       const Icon(Icons.fact_check_rounded, size: 16),
                       const SizedBox(width: 6),
                       const Text('Mod Queue'),
-                      if (pendingCount > 0) ...[
+                      if (pendingCount + bountyReviewCount > 0) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -232,7 +243,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
-                            '$pendingCount',
+                            '${pendingCount + bountyReviewCount}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 10,
@@ -249,8 +260,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     children: [
                       const Icon(Icons.verified_user_rounded, size: 16),
                       const SizedBox(width: 6),
-                      const Text('Uploader Requests'),
-                      if (pendingReqCount > 0) ...[
+                      const Text('Verifications'),
+                      if (pendingReqCount + pendingStudentVerifCount > 0) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -260,7 +271,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
-                            '$pendingReqCount',
+                            '${pendingReqCount + pendingStudentVerifCount}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 10,
@@ -308,10 +319,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           _buildOverridesManager(overrides, slots, subjects),
 
           // TAB 4: Moderation Queue
-          _buildModQueue(resources, overrides, subjects),
+          _buildModQueue(resources, overrides, subjects, slots, users, bounties),
 
-          // TAB 5: Contributor / Uploader Verification Requests
-          _buildUploaderRequestsManager(uploaderRequests),
+          // TAB 5: Student Badge & Uploader Verification Requests
+          _buildUploaderRequestsManager(
+              uploaderRequests, studentVerifications, users),
 
           // TAB 6: Users & Students Roster Manager
           _buildUsersManager(users),
@@ -343,7 +355,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
         Container(
           height: 56,
           padding: const EdgeInsets.symmetric(vertical: 8),
-          color: Colors.white,
+          color: AppColors.cardSurface,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -365,7 +377,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isSelected ? AppColors.primary : const Color(0xFFF8FAFC),
+                    color: isSelected ? AppColors.primary : AppColors.surfaceSubtle,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: isSelected ? AppColors.primary : AppColors.border,
@@ -418,7 +430,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             children: [
               Text(
                 '$selectedDayName (${daySlots.length} Slots)',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary,
@@ -453,12 +465,12 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.event_busy_rounded,
+                      Icon(Icons.event_busy_rounded,
                           size: 48, color: AppColors.border),
                       const SizedBox(height: 12),
                       Text(
                         'No lecture slots scheduled for $selectedDayName.',
-                        style: const TextStyle(
+                        style: TextStyle(
                             color: AppColors.textSecondary, fontSize: 13),
                       ),
                       const SizedBox(height: 16),
@@ -468,7 +480,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         label: const Text('Schedule First Lecture Slot'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.primary,
-                          side: const BorderSide(color: AppColors.primary),
+                          side: BorderSide(color: AppColors.primary),
                         ),
                       ),
                     ],
@@ -532,7 +544,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Curriculum Courses',
                       style: TextStyle(
                         fontSize: 16,
@@ -542,7 +554,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     ),
                     Text(
                       '${subjects.length} Active Academic Subjects',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
                       ),
@@ -557,7 +569,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   minimumSize: const Size(0, 36),
-                  side: const BorderSide(color: AppColors.border),
+                  side: BorderSide(color: AppColors.border),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -571,12 +583,12 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             Container(
               padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppColors.border),
               ),
               child: Column(
-                children: const [
+                children: [
                   Icon(Icons.school_outlined,
                       size: 40, color: AppColors.textSecondary),
                   SizedBox(height: 12),
@@ -669,7 +681,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
+                  children: [
                     Text(
                       'Live Override System',
                       style: TextStyle(
@@ -699,7 +711,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           children: [
             Text(
               'Active Broadcasts (${overrides.length})',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
                 color: AppColors.textPrimary,
@@ -727,11 +739,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.cardSurface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.border),
             ),
-            child: const Center(
+            child: Center(
               child: Text(
                 'No live overrides or cancellations active.\nClasses are following the standard timetable.',
                 textAlign: TextAlign.center,
@@ -767,9 +779,13 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     List<ResourceModel> resources,
     List<DailyOverrideModel> overrides,
     List<SubjectModel> subjects,
+    List<TimetableSlotModel> slots,
+    List<UserModel> users,
+    List<NoteBountyModel> bounties,
   ) {
     final pendingResources = resources.where((r) => !r.isApproved).toList();
     final pendingOverrides = overrides.where((o) => !o.isApproved).toList();
+    final pendingBounties = bounties.where((b) => b.needsReview).toList();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
@@ -777,7 +793,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
+            Text(
               'Student Submissions Review',
               style: TextStyle(
                 fontSize: 16,
@@ -788,11 +804,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: AppColors.warningBg,
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                '${pendingResources.length + pendingOverrides.length} PENDING',
+                '${pendingResources.length + pendingOverrides.length + pendingBounties.length} PENDING',
                 style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
@@ -804,16 +820,18 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
         ),
         const SizedBox(height: 14),
 
-        if (pendingResources.isEmpty && pendingOverrides.isEmpty)
+        if (pendingResources.isEmpty &&
+            pendingOverrides.isEmpty &&
+            pendingBounties.isEmpty)
           Container(
             padding: const EdgeInsets.all(28),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.cardSurface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.border),
             ),
             child: Column(
-              children: const [
+              children: [
                 Icon(Icons.check_circle_outline_rounded,
                     size: 44, color: AppColors.success),
                 SizedBox(height: 10),
@@ -838,7 +856,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           )
         else ...[
           if (pendingResources.isNotEmpty) ...[
-            const Text(
+            Text(
               'Vault Notes & Study Materials',
               style: TextStyle(
                 fontSize: 13,
@@ -850,6 +868,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             for (final res in pendingResources) ...[
               _AdminModResourceCard(
                 resource: res,
+                onEdit: () => showEditResourceModal(context, ref, res),
                 onApprove: () {
                   ref
                       .read(resourcesProvider.notifier)
@@ -872,7 +891,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           ],
 
           if (pendingOverrides.isNotEmpty) ...[
-            const Text(
+            Text(
               'Student Schedule Reports',
               style: TextStyle(
                 fontSize: 13,
@@ -885,6 +904,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
               _AdminModOverrideCard(
                 dailyOverride: ov,
                 subjects: subjects,
+                slots: slots,
+                users: users,
                 onApprove: () {
                   ref
                       .read(dailyOverridesProvider.notifier)
@@ -905,7 +926,388 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
               const SizedBox(height: 10),
             ],
           ],
+
+          if (pendingBounties.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Note Bounties Escrow Review',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const NoteBountiesScreen(),
+                    ),
+                  ),
+                  child: const Text('Open Full View'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            for (final b in pendingBounties) ...[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.cardSurface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: b.isDisputed
+                        ? AppColors.danger.withValues(alpha: 0.45)
+                        : AppColors.border,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: b.isDisputed
+                                ? AppColors.dangerBg
+                                : AppColors.warningBg,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            b.isDisputed ? 'DISPUTED SCAM CHECK' : 'SUBMITTED',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: b.isDisputed
+                                  ? AppColors.danger
+                                  : AppColors.warning,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${b.rewardCredits} ⚡ Escrow',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      b.title,
+                      style: const TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.w800),
+                    ),
+                    Text(
+                      'Requester: ${b.requesterName} • Helper: ${b.helperName ?? "Student"}',
+                      style: TextStyle(
+                          fontSize: 11, color: AppColors.textSecondary),
+                    ),
+                    if (b.solutionText != null && b.solutionText!.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        b.solutionText!,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11.5, color: AppColors.textPrimary),
+                      ),
+                    ],
+                    if (b.solutionUrl != null && b.solutionUrl!.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () =>
+                            Formatters.launchMeetingUrl(context, b.solutionUrl),
+                        icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                        label: const Text('Inspect Submitted Attachment'),
+                      ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              final err = await ref
+                                  .read(noteBountiesProvider.notifier)
+                                  .adminRejectSubmission(b.id);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(err ??
+                                      'Submission rejected (0 credits). Bounty re-opened.'),
+                                ),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: AppColors.danger),
+                              foregroundColor: AppColors.danger,
+                              minimumSize: const Size(0, 36),
+                            ),
+                            child: const Text('Reject Scam'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () async {
+                              final err = await ref
+                                  .read(noteBountiesProvider.notifier)
+                                  .adminApproveBounty(b.id);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(err ??
+                                      'Approved! ${b.rewardCredits} ⚡ paid to ${b.helperName ?? "helper"}.'),
+                                  backgroundColor: AppColors.success,
+                                ),
+                              );
+                            },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.success,
+                              minimumSize: const Size(0, 36),
+                            ),
+                            child: Text('Pay ${b.rewardCredits} ⚡'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ],
         ],
+
+        // PUBLISHED VAULT DOCUMENTS MANAGER (EDIT / DELETE)
+        const SizedBox(height: 24),
+        Builder(
+          builder: (context) {
+            final publishedResources = resources
+                .where((r) => r.isApproved && !r.url.startsWith('ccquiz://'))
+                .toList();
+            final q = _vaultSearchQuery.trim().toLowerCase();
+            final filteredVault = publishedResources.where((r) {
+              if (q.isEmpty) return true;
+              final sub = resolveSubjectById(subjects, r.subjectId);
+              return r.title.toLowerCase().contains(q) ||
+                  r.uploaderName.toLowerCase().contains(q) ||
+                  (sub?.code.toLowerCase().contains(q) ?? false) ||
+                  (sub?.name.toLowerCase().contains(q) ?? false);
+            }).toList();
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Published Vault Documents',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            '${publishedResources.length} published notes, slides & lectures',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => showUploadModal(context, ref),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      icon: const Icon(Icons.add_rounded, size: 17),
+                      label: const Text(
+                        'Upload',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _vaultSearchCtrl,
+                  onChanged: (val) => setState(() => _vaultSearchQuery = val),
+                  decoration: InputDecoration(
+                    hintText: 'Search uploaded notes by title, subject, or uploader...',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                    suffixIcon: _vaultSearchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () {
+                              _vaultSearchCtrl.clear();
+                              setState(() => _vaultSearchQuery = '');
+                            },
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (filteredVault.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardSurface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Center(
+                      child: Text(
+                        publishedResources.isEmpty
+                            ? 'No uploaded Vault documents yet.'
+                            : 'No uploaded documents match "$_vaultSearchQuery".',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  for (final res in filteredVault) ...[
+                    Builder(
+                      builder: (context) {
+                        final sub = resolveSubjectById(subjects, res.subjectId);
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: AppColors.cardSurface,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primarySoft,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  res.type.icon,
+                                  color: AppColors.primary,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        if (sub != null) ...[
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: sub.color
+                                                  .withValues(alpha: 0.12),
+                                              borderRadius:
+                                                  BorderRadius.circular(5),
+                                            ),
+                                            child: Text(
+                                              sub.code,
+                                              style: TextStyle(
+                                                fontSize: 9.5,
+                                                fontWeight: FontWeight.w800,
+                                                color: sub.color,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        Text(
+                                          res.type.label,
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      res.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.textPrimary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'By ${res.uploaderName}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Edit Document',
+                                icon: Icon(
+                                  Icons.edit_outlined,
+                                  color: AppColors.primary,
+                                  size: 20,
+                                ),
+                                onPressed: () =>
+                                    showEditResourceModal(context, ref, res),
+                              ),
+                              IconButton(
+                                tooltip: 'Delete Document',
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: AppColors.dangerText,
+                                  size: 20,
+                                ),
+                                onPressed: () => confirmDeleteResourceDialog(
+                                    context, ref, res),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+              ],
+            );
+          },
+        ),
       ],
     );
   }
@@ -958,8 +1360,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 20,
                 MediaQuery.of(context).viewInsets.bottom + 24,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
+              decoration: BoxDecoration(
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: SingleChildScrollView(
@@ -984,7 +1386,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       children: [
                         Text(
                           isEditing ? 'Edit Lecture Slot' : 'Add Timetable Slot',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
@@ -999,7 +1401,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     const SizedBox(height: 16),
 
                     // Subject Selector
-                    const Text(
+                    Text(
                       'Select Course / Subject',
                       style: TextStyle(
                         fontSize: 13,
@@ -1011,7 +1413,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppColors.surfaceSubtle,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: AppColors.border),
                       ),
@@ -1057,7 +1459,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     const SizedBox(height: 14),
 
                     // Day of Week Selector
-                    const Text(
+                    Text(
                       'Day of Week',
                       style: TextStyle(
                         fontSize: 13,
@@ -1100,7 +1502,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Start Time',
                                 style: TextStyle(
                                   fontSize: 13,
@@ -1132,7 +1534,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF8FAFC),
+                                    color: AppColors.surfaceSubtle,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(color: AppColors.border),
                                   ),
@@ -1147,7 +1549,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                           fontSize: 14,
                                         ),
                                       ),
-                                      const Icon(Icons.access_time_rounded,
+                                      Icon(Icons.access_time_rounded,
                                           size: 16,
                                           color: AppColors.textSecondary),
                                     ],
@@ -1162,7 +1564,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'End Time',
                                 style: TextStyle(
                                   fontSize: 13,
@@ -1194,7 +1596,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF8FAFC),
+                                    color: AppColors.surfaceSubtle,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(color: AppColors.border),
                                   ),
@@ -1209,7 +1611,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                           fontSize: 14,
                                         ),
                                       ),
-                                      const Icon(Icons.access_time_rounded,
+                                      Icon(Icons.access_time_rounded,
                                           size: 16,
                                           color: AppColors.textSecondary),
                                     ],
@@ -1224,7 +1626,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     const SizedBox(height: 14),
 
                     // Room input
-                    const Text(
+                    Text(
                       'Default Lecture Room / Hall',
                       style: TextStyle(
                         fontSize: 13,
@@ -1239,10 +1641,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         hintText: 'e.g. Hall A-102, Lab 3',
                         prefixIcon: const Icon(Icons.room_outlined, size: 18),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppColors.border),
+                          borderSide: BorderSide(color: AppColors.border),
                         ),
                       ),
                     ),
@@ -1269,7 +1671,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     const SizedBox(height: 14),
 
                     // Meeting / Online Class URL (Optional)
-                    const Text(
+                    Text(
                       'Meeting / Online Class URL (Optional)',
                       style: TextStyle(
                         fontSize: 13,
@@ -1287,10 +1689,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         prefixIcon:
                             const Icon(Icons.video_call_rounded, size: 20),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppColors.border),
+                          borderSide: BorderSide(color: AppColors.border),
                         ),
                       ),
                     ),
@@ -1454,8 +1856,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 20,
                 MediaQuery.of(context).viewInsets.bottom + 24,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
+              decoration: BoxDecoration(
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: SingleChildScrollView(
@@ -1480,7 +1882,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       children: [
                         Text(
                           isEditing ? 'Edit Course Details' : 'Add New Course',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
@@ -1494,7 +1896,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     ),
                     const SizedBox(height: 14),
 
-                    const Text(
+                    Text(
                       'Course Name',
                       style: TextStyle(
                           fontSize: 13,
@@ -1507,10 +1909,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       decoration: InputDecoration(
                         hintText: 'e.g. Distributed Operating Systems',
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppColors.border),
+                          borderSide: BorderSide(color: AppColors.border),
                         ),
                       ),
                     ),
@@ -1523,7 +1925,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Code',
                                 style: TextStyle(
                                     fontSize: 13,
@@ -1538,10 +1940,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                 decoration: InputDecoration(
                                   hintText: 'CS301',
                                   filled: true,
-                                  fillColor: const Color(0xFFF8FAFC),
+                                  fillColor: AppColors.surfaceSubtle,
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
+                                    borderSide: BorderSide(
                                         color: AppColors.border),
                                   ),
                                 ),
@@ -1555,7 +1957,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Professor / Instructor',
                                 style: TextStyle(
                                     fontSize: 13,
@@ -1568,10 +1970,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                 decoration: InputDecoration(
                                   hintText: 'Dr. Sarah Mitchell',
                                   filled: true,
-                                  fillColor: const Color(0xFFF8FAFC),
+                                  fillColor: AppColors.surfaceSubtle,
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
+                                    borderSide: BorderSide(
                                         color: AppColors.border),
                                   ),
                                 ),
@@ -1586,7 +1988,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'Minimum Attendance Target',
                           style: TextStyle(
                               fontSize: 13,
@@ -1595,7 +1997,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         ),
                         Text(
                           '${minAttendance.toInt()}%',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
                             color: AppColors.primary,
@@ -1616,7 +2018,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     ),
                     const SizedBox(height: 10),
 
-                    const Text(
+                    Text(
                       'Theme Color',
                       style: TextStyle(
                           fontSize: 13,
@@ -1641,7 +2043,9 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                               color: color,
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: isSel ? Colors.black : Colors.white,
+                                color: isSel
+                                    ? AppColors.textPrimary
+                                    : AppColors.cardSurface,
                                 width: isSel ? 3 : 2,
                               ),
                               boxShadow: [
@@ -1843,8 +2247,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 20,
                 MediaQuery.of(context).viewInsets.bottom + 24,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
+              decoration: BoxDecoration(
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: SingleChildScrollView(
@@ -1866,7 +2270,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
 
                     Text(
                       'Direct Broadcast: ${currentSubject.code}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
@@ -1874,14 +2278,14 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     ),
                     Text(
                       'Regular (${_dayNameFromWeekday(currentSlot.dayOfWeek)}): ${currentSlot.formattedTimeRange} • ${currentSlot.defaultRoom}',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 12, color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 14),
 
                     if (selectableSlots != null &&
                         selectableSlots.length > 1) ...[
-                      const Text(
+                      Text(
                         'Select Lecture Slot',
                         style: TextStyle(
                             fontSize: 13,
@@ -1892,7 +2296,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: AppColors.surfaceSubtle,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: AppColors.border),
                         ),
@@ -1947,7 +2351,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       const SizedBox(height: 14),
                     ],
 
-                    const Text(
+                    Text(
                       'Action Type',
                       style: TextStyle(
                           fontSize: 13,
@@ -2003,7 +2407,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
 
                     if (status == OverrideStatus.rescheduled) ...[
                       // Reschedule Date / Day
-                      const Text(
+                      Text(
                         'Meeting Day / Date',
                         style: TextStyle(
                             fontSize: 13,
@@ -2030,26 +2434,26 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
+                            color: AppColors.surfaceSubtle,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: AppColors.border),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.calendar_today_rounded,
+                              Icon(Icons.calendar_today_rounded,
                                   size: 18, color: AppColors.primary),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   '${_dayNameFromWeekday(selectedDate.weekday)}, ${selectedDate.day} ${_monthName(selectedDate.month)} ${selectedDate.year}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w700,
                                     color: AppColors.textPrimary,
                                   ),
                                 ),
                               ),
-                              const Icon(Icons.arrow_drop_down_rounded,
+                              Icon(Icons.arrow_drop_down_rounded,
                                   color: AppColors.textSecondary),
                             ],
                           ),
@@ -2078,7 +2482,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                   backgroundColor:
                                       selectedDate.weekday == (d['day'] as int)
                                           ? AppColors.primary
-                                          : const Color(0xFFF1F5F9),
+                                          : AppColors.surfaceMuted,
                                   onPressed: () {
                                     final targetW = d['day'] as int;
                                     setModalState(() {
@@ -2094,7 +2498,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       const SizedBox(height: 14),
 
                       // Meeting Time (Start & End)
-                      const Text(
+                      Text(
                         'Meeting Time (Start & End)',
                         style: TextStyle(
                             fontSize: 13,
@@ -2132,20 +2536,20 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 12, vertical: 12),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF8FAFC),
+                                  color: AppColors.surfaceSubtle,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: AppColors.border),
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.access_time_rounded,
+                                    Icon(Icons.access_time_rounded,
                                         size: 18, color: AppColors.primary),
                                     const SizedBox(width: 8),
                                     Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        const Text('Start Time',
+                                        Text('Start Time',
                                             style: TextStyle(
                                                 fontSize: 10,
                                                 color:
@@ -2153,7 +2557,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                         Text(
                                             Formatters.formatTimeString(
                                                 startTime),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.w800,
                                                 color: AppColors.textPrimary)),
@@ -2193,7 +2597,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 12, vertical: 12),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF8FAFC),
+                                  color: AppColors.surfaceSubtle,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: AppColors.border),
                                 ),
@@ -2206,14 +2610,14 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        const Text('End Time',
+                                        Text('End Time',
                                             style: TextStyle(
                                                 fontSize: 10,
                                                 color:
                                                     AppColors.textSecondary)),
                                         Text(
                                             Formatters.formatTimeString(endTime),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.w800,
                                                 color: AppColors.textPrimary)),
@@ -2229,7 +2633,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       const SizedBox(height: 14),
 
                       // Room / Venue
-                      const Text(
+                      Text(
                         'Room / Venue',
                         style: TextStyle(
                             fontSize: 13,
@@ -2243,18 +2647,18 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           hintText: 'e.g. CS Lab 5 (2nd Floor)',
                           prefixIcon: const Icon(Icons.room_rounded, size: 18),
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppColors.surfaceSubtle,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide:
-                                const BorderSide(color: AppColors.border),
+                                BorderSide(color: AppColors.border),
                           ),
                         ),
                       ),
                       const SizedBox(height: 14),
 
                       // Meeting / Online Class URL (Optional)
-                      const Text(
+                      Text(
                         'Meeting / Online Class URL (Optional)',
                         style: TextStyle(
                             fontSize: 13,
@@ -2271,11 +2675,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           prefixIcon:
                               const Icon(Icons.video_call_rounded, size: 20),
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppColors.surfaceSubtle,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide:
-                                const BorderSide(color: AppColors.border),
+                                BorderSide(color: AppColors.border),
                           ),
                         ),
                       ),
@@ -2290,7 +2694,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         dense: true,
                         controlAffinity: ListTileControlAffinity.leading,
                         activeColor: AppColors.primary,
-                        title: const Text(
+                        title: Text(
                           'Also update permanent weekly timetable slot',
                           style: TextStyle(
                             fontSize: 12,
@@ -2302,7 +2706,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       const SizedBox(height: 6),
                     ],
 
-                    const Text(
+                    Text(
                       'Announcement / Reason (Optional)',
                       style: TextStyle(
                           fontSize: 13,
@@ -2317,10 +2721,10 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                             ? 'e.g. Professor attending conference'
                             : 'e.g. Extra prep session or Midterm shift',
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppColors.border),
+                          borderSide: BorderSide(color: AppColors.border),
                         ),
                       ),
                     ),
@@ -2482,8 +2886,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setSheetState) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: AppColors.cardSurface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: EdgeInsets.fromLTRB(
@@ -2512,11 +2916,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         color: AppColors.primarySoft,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.security_rounded,
+                      child: Icon(Icons.security_rounded,
                           color: AppColors.primary, size: 20),
                     ),
                     const SizedBox(width: 10),
-                    const Text(
+                    Text(
                       'Admin Security & PIN Reset',
                       style: TextStyle(
                         fontSize: 16,
@@ -2531,7 +2935,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 10),
 
                 // Section 1: Reset Student PIN
-                const Text(
+                Text(
                   'Reset Student Security PIN',
                   style: TextStyle(
                     fontSize: 14,
@@ -2540,7 +2944,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'If a student forgot their PIN or someone mistakenly claimed their roll number, reset it here.',
                   style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
@@ -2612,7 +3016,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 10),
 
                 // Section 2: Change Master Admin Passkey
-                const Text(
+                Text(
                   'Change Admin Master Passkey',
                   style: TextStyle(
                     fontSize: 14,
@@ -2621,7 +3025,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'Master passkey is configured in your .env / env.json. You can update it below.',
                   style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
@@ -2693,7 +3097,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
 
                 // Section 3: Authorized Admin Roll Numbers (Whitelist)
                 Row(
-                  children: const [
+                  children: [
                     Icon(Icons.verified_user_rounded,
                         size: 18, color: AppColors.primary),
                     SizedBox(width: 8),
@@ -2708,7 +3112,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'Even if the passcode is leaked, only students with these Roll Numbers can unlock the Admin Console.',
                   style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
@@ -2722,13 +3126,13 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       children: whitelist.map((r) {
                         final isProtected = r == '23-SE-402';
                         return Chip(
-                          backgroundColor: const Color(0xFFEFF6FF),
-                          side: const BorderSide(color: Color(0xFFDBEAFE)),
-                          avatar: const Icon(Icons.shield_rounded,
+                          backgroundColor: AppColors.blueBg,
+                          side: BorderSide(color: AppColors.blueBorder),
+                          avatar: Icon(Icons.shield_rounded,
                               size: 14, color: AppColors.primary),
                           label: Text(
                             r,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                               fontFamily: 'monospace',
@@ -2805,7 +3209,13 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
   // TAB 5: CONTRIBUTOR / UPLOADER VERIFICATION REQUESTS MANAGER
   // ===================================================================
 
-  Widget _buildUploaderRequestsManager(List<UploaderRequestModel> requests) {
+  Widget _buildUploaderRequestsManager(
+    List<UploaderRequestModel> requests,
+    List<StudentVerificationRequestModel> studentVerifications,
+    List<UserModel> users,
+  ) {
+    final pendingStudentReqs =
+        studentVerifications.where((r) => r.isPending).toList();
     final query = _uploaderReqSearch.trim().toLowerCase();
     final filtered = requests.where((r) {
       if (_uploaderReqFilter == 'pending' && !r.isPending) return false;
@@ -2827,10 +3237,183 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     return RefreshIndicator(
       onRefresh: () async {
         await ref.read(uploaderRequestsProvider.notifier).refresh();
+        await ref
+            .read(studentVerificationRequestsProvider.notifier)
+            .refresh();
       },
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Verified Student Badge Requests Section (Anti-Fake Account Gate)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.cardSurface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.verified_rounded,
+                        color: AppColors.primary, size: 19),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Verified Student Badge Requests',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.warningBg,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${pendingStudentReqs.length} PENDING',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.warning,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Verify Name & Roll No before granting the Verified Student Badge (required for Note Bounties). Existing verified accounts are unaffected.',
+                  style: TextStyle(
+                      fontSize: 11, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 10),
+                if (pendingStudentReqs.isEmpty)
+                  Text(
+                    'No pending Student Badge requests right now.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  )
+                else
+                  for (final sReq in pendingStudentReqs) ...[
+                    Builder(builder: (_) {
+                      final normReqUid = UuidUtil.fromString(sReq.userId);
+                      final cleanReqRoll = sReq.rollNo.trim().toUpperCase();
+                      final clash = users.cast<UserModel?>().firstWhere(
+                            (u) =>
+                                u != null &&
+                                u.isKzynovexVerified &&
+                                UuidUtil.fromString(u.id) != normReqUid &&
+                                (u.rollNo ?? '').trim().toUpperCase() ==
+                                    cleanReqRoll &&
+                                cleanReqRoll.isNotEmpty,
+                            orElse: () => null,
+                          );
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: clash != null
+                              ? AppColors.dangerBg
+                              : AppColors.surfaceSubtle,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: clash != null
+                                ? AppColors.danger.withValues(alpha: 0.45)
+                                : AppColors.border,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${sReq.name} (${sReq.rollNo})',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  Text(
+                                    sReq.email,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                  if (clash != null) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '⚠️ Roll No already verified on ${clash.name} (${clash.email})',
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.danger,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Approve Badge',
+                              icon: const Icon(Icons.check_circle_rounded,
+                                  color: AppColors.success),
+                              onPressed: () async {
+                                await ref
+                                    .read(studentVerificationRequestsProvider
+                                        .notifier)
+                                    .approveRequest(sReq.id);
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        'Verified badge granted to ${sReq.name} (${sReq.rollNo})!'),
+                                    backgroundColor: AppColors.success,
+                                  ),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              tooltip: 'Reject Badge',
+                              icon: const Icon(Icons.cancel_rounded,
+                                  color: AppColors.danger),
+                              onPressed: () async {
+                                await ref
+                                    .read(studentVerificationRequestsProvider
+                                        .notifier)
+                                    .rejectRequest(sReq.id);
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Student badge request rejected.'),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
           // Banner card
           Container(
             padding: const EdgeInsets.all(16),
@@ -2923,14 +3506,14 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       label: 'Pending',
                       count: pendingCount,
                       icon: Icons.hourglass_top_rounded,
-                      color: const Color(0xFFFDE68A),
+                      color: AppColors.warningBorder,
                     ),
                     const SizedBox(width: 8),
                     _buildStatPill(
                       label: 'Approved',
                       count: approvedCount,
                       icon: Icons.check_circle_rounded,
-                      color: const Color(0xFFBBF7D0),
+                      color: AppColors.successBorder,
                     ),
                   ],
                 ),
@@ -2946,7 +3529,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             decoration: InputDecoration(
               hintText: 'Search by Name, Roll No or Google Email...',
               hintStyle:
-                  const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                  TextStyle(fontSize: 13, color: AppColors.textSecondary),
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               suffixIcon: _uploaderReqSearch.isNotEmpty
                   ? IconButton(
@@ -2958,19 +3541,19 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     )
                   : null,
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppColors.surfaceSubtle,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.border),
+                borderSide: BorderSide(color: AppColors.border),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.border),
+                borderSide: BorderSide(color: AppColors.border),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide:
-                    const BorderSide(color: AppColors.primary, width: 1.5),
+                    BorderSide(color: AppColors.primary, width: 1.5),
               ),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -3000,21 +3583,21 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             Container(
               padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppColors.border),
               ),
               child: Center(
                 child: Column(
                   children: [
-                    const Icon(Icons.verified_user_outlined,
-                        size: 40, color: Color(0xFFCBD5E1)),
+                    Icon(Icons.verified_user_outlined,
+                        size: 40, color: AppColors.borderStrong),
                     const SizedBox(height: 8),
                     Text(
                       _uploaderReqSearch.isNotEmpty
                           ? 'No verification requests matching "$_uploaderReqSearch"'
                           : 'No $_uploaderReqFilter verification requests found',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textSecondary,
@@ -3036,28 +3619,28 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     final isApproved = req.isApproved;
 
     Color badgeColor = const Color(0xFFD97706);
-    Color badgeBg = const Color(0xFFFEF3C7);
+    Color badgeBg = AppColors.warningBg;
     String statusLabel = 'PENDING VERIFICATION';
 
     if (isApproved) {
       badgeColor = const Color(0xFF059669);
-      badgeBg = const Color(0xFFD1FAE5);
+      badgeBg = AppColors.successBgStrong;
       statusLabel = 'APPROVED CONTRIBUTOR';
     } else if (req.isRejected) {
       badgeColor = AppColors.danger;
-      badgeBg = const Color(0xFFFEE2E2);
+      badgeBg = AppColors.dangerBgStrong;
       statusLabel = 'DECLINED';
     }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isPending
-              ? const Color(0xFFFDE68A)
-              : (isApproved ? const Color(0xFFA7F3D0) : AppColors.border),
+              ? AppColors.warningBorder
+              : (isApproved ? AppColors.successBorder : AppColors.border),
           width: isPending ? 1.5 : 1.0,
         ),
         boxShadow: [
@@ -3098,7 +3681,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           Flexible(
                             child: Text(
                               req.name,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,
                                 color: AppColors.textPrimary,
@@ -3136,18 +3719,18 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
+                              color: AppColors.surfaceMuted,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.badge_outlined,
+                                Icon(Icons.badge_outlined,
                                     size: 12, color: AppColors.primary),
                                 const SizedBox(width: 4),
                                 Text(
                                   'Roll No: ${req.rollNo}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
                                     fontFamily: 'monospace',
                                     fontWeight: FontWeight.w700,
@@ -3161,7 +3744,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           Expanded(
                             child: Text(
                               req.googleEmail,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 color: AppColors.textSecondary,
                               ),
@@ -3180,26 +3763,26 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: AppColors.surfaceSubtle,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.schedule_rounded,
+                  Icon(Icons.schedule_rounded,
                       size: 13, color: AppColors.textSecondary),
                   const SizedBox(width: 6),
                   Text(
                     'Submitted: ${req.submittedAt.day}/${req.submittedAt.month}/${req.submittedAt.year} at ${req.submittedAt.hour.toString().padLeft(2, '0')}:${req.submittedAt.minute.toString().padLeft(2, '0')}',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 11, color: AppColors.textSecondary),
                   ),
                   if (req.reviewedBy != null) ...[
                     const Spacer(),
                     Text(
                       'Reviewed by: ${req.reviewedBy}',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 10,
-                          color: Color(0xFF64748B),
+                          color: AppColors.textSecondary,
                           fontWeight: FontWeight.w600),
                     ),
                   ],
@@ -3224,7 +3807,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                             SnackBar(
                               content: Text(
                                   'Verified & Authorized: ${req.name} (${req.rollNo}) can now post notes!'),
-                              backgroundColor: AppColors.textPrimary,
+                              backgroundColor: AppColors.snackBarBg,
                             ),
                           );
                         }
@@ -3258,7 +3841,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       },
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.danger,
-                        side: const BorderSide(color: Color(0xFFFECACA)),
+                        side: BorderSide(color: AppColors.dangerBorder),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10)),
                         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -3275,7 +3858,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFD1FAE5),
+                      color: AppColors.successBgStrong,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text(
@@ -3441,14 +4024,14 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       label: 'Students',
                       count: studentCount,
                       icon: Icons.school_rounded,
-                      color: const Color(0xFFA7F3D0),
+                      color: AppColors.successBorder,
                     ),
                     const SizedBox(width: 8),
                     _buildStatPill(
                       label: 'Admins',
                       count: adminCount,
                       icon: Icons.shield_rounded,
-                      color: const Color(0xFFFDE68A),
+                      color: AppColors.warningBorder,
                     ),
                     const SizedBox(width: 8),
                     _buildStatPill(
@@ -3476,7 +4059,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                   },
                   decoration: InputDecoration(
                     hintText: 'Search by name, roll no, or email...',
-                    hintStyle: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                    hintStyle: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                     prefixIcon: const Icon(Icons.search_rounded, size: 20),
                     suffixIcon: _userSearchQuery.isNotEmpty
                         ? IconButton(
@@ -3488,15 +4071,15 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           )
                         : null,
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: AppColors.surfaceSubtle,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.border),
+                      borderSide: BorderSide(color: AppColors.border),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.border),
+                      borderSide: BorderSide(color: AppColors.border),
                     ),
                   ),
                 ),
@@ -3548,7 +4131,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
               padding: const EdgeInsets.all(32),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppColors.border),
               ),
@@ -3561,11 +4144,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       color: AppColors.primarySoft,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.person_search_rounded,
+                    child: Icon(Icons.person_search_rounded,
                         size: 36, color: AppColors.primary),
                   ),
                   const SizedBox(height: 14),
-                  const Text(
+                  Text(
                     'No users found',
                     style: TextStyle(
                       fontSize: 16,
@@ -3579,7 +4162,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         ? 'No user matches "$_userSearchQuery". Try another keyword or clear search.'
                         : 'No users registered under this filter.',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       color: AppColors.textSecondary,
                     ),
@@ -3658,7 +4241,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
         setState(() => _userRoleFilter = key);
       },
       selectedColor: AppColors.primary,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.cardSurface,
       side: BorderSide(
         color: isSelected ? AppColors.primary : AppColors.border,
       ),
@@ -3682,7 +4265,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
         setState(() => _uploaderReqFilter = key);
       },
       selectedColor: AppColors.primary,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.cardSurface,
       side: BorderSide(
         color: isSelected ? AppColors.primary : AppColors.border,
       ),
@@ -3706,11 +4289,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isAdmin
-              ? const Color(0xFFFDE68A)
+              ? AppColors.warningBorder
               : AppColors.border,
           width: isAdmin ? 1.5 : 1.0,
         ),
@@ -3774,7 +4357,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       Flexible(
                         child: Text(
                           user.name,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
@@ -3797,13 +4380,13 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                             horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(
                           color: isAdmin
-                              ? const Color(0xFFFEF3C7)
-                              : const Color(0xFFEFF6FF),
+                              ? AppColors.warningBg
+                              : AppColors.blueBg,
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
                             color: isAdmin
-                                ? const Color(0xFFFDE68A)
-                                : const Color(0xFFDBEAFE),
+                                ? AppColors.warningBorder
+                                : AppColors.blueBorder,
                           ),
                         ),
                         child: Text(
@@ -3833,18 +4416,18 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
+                          color: AppColors.surfaceMuted,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.badge_rounded,
+                            Icon(Icons.badge_rounded,
                                 size: 12, color: AppColors.textSecondary),
                             const SizedBox(width: 4),
                             Text(
                               user.rollNo ?? 'No Roll No',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
                                 fontFamily: 'monospace',
@@ -3858,12 +4441,12 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.email_outlined,
+                            Icon(Icons.email_outlined,
                                 size: 12, color: AppColors.textSecondary),
                             const SizedBox(width: 4),
                             Text(
                               user.email,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 color: AppColors.textSecondary,
                               ),
@@ -3935,7 +4518,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
 
             // Actions popup menu
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert_rounded,
+              icon: Icon(Icons.more_vert_rounded,
                   color: AppColors.textSecondary),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
@@ -3970,7 +4553,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 }
               },
               itemBuilder: (ctx) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'edit',
                   child: Row(
                     children: [
@@ -4053,8 +4636,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setSheetState) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: AppColors.cardSurface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: EdgeInsets.fromLTRB(
@@ -4083,11 +4666,11 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         color: AppColors.primarySoft,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.person_add_rounded,
+                      child: Icon(Icons.person_add_rounded,
                           color: AppColors.primary, size: 20),
                     ),
                     const SizedBox(width: 10),
-                    const Text(
+                    Text(
                       'Pre-Register Student / User',
                       style: TextStyle(
                         fontSize: 16,
@@ -4102,7 +4685,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 10),
 
                 // Name
-                const Text(
+                Text(
                   'Full Student Name *',
                   style: TextStyle(
                     fontSize: 13,
@@ -4121,7 +4704,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 14),
 
                 // Roll No
-                const Text(
+                Text(
                   'Roll Number (Unique ID) *',
                   style: TextStyle(
                     fontSize: 13,
@@ -4141,7 +4724,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 14),
 
                 // Email
-                const Text(
+                Text(
                   'Email Address (Optional)',
                   style: TextStyle(
                     fontSize: 13,
@@ -4161,7 +4744,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 14),
 
                 // Initial PIN
-                const Text(
+                Text(
                   'Initial 4-Digit Security PIN *',
                   style: TextStyle(
                     fontSize: 13,
@@ -4183,7 +4766,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 14),
 
                 // Role selector
-                const Text(
+                Text(
                   'Account Role',
                   style: TextStyle(
                     fontSize: 13,
@@ -4229,7 +4812,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         selected: selectedRole == 'admin',
                         onSelected: (_) =>
                             setSheetState(() => selectedRole = 'admin'),
-                        selectedColor: const Color(0xFFFEF3C7),
+                        selectedColor: AppColors.warningBg,
                         side: BorderSide(
                           color: selectedRole == 'admin'
                               ? AppColors.warning
@@ -4250,7 +4833,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     'Verified Scholar Badge',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                   ),
-                  subtitle: const Text(
+                  subtitle: Text(
                     'Grants official student verification checkmark in class',
                     style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                   ),
@@ -4351,8 +4934,8 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setSheetState) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: AppColors.cardSurface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: EdgeInsets.fromLTRB(
@@ -4381,7 +4964,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         color: AppColors.primarySoft,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.edit_note_rounded,
+                      child: Icon(Icons.edit_note_rounded,
                           color: AppColors.primary, size: 20),
                     ),
                     const SizedBox(width: 10),
@@ -4391,7 +4974,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         children: [
                           Text(
                             'Edit User: ${user.name}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
                               color: AppColors.textPrimary,
@@ -4401,7 +4984,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                           ),
                           Text(
                             'Roll No: ${user.rollNo ?? "N/A"}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               fontFamily: 'monospace',
                               fontWeight: FontWeight.w700,
@@ -4418,7 +5001,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 10),
 
                 // Name
-                const Text(
+                Text(
                   'Full Student Name',
                   style: TextStyle(
                     fontSize: 13,
@@ -4436,7 +5019,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 14),
 
                 // Email
-                const Text(
+                Text(
                   'Email Address',
                   style: TextStyle(
                     fontSize: 13,
@@ -4461,7 +5044,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Credits',
                             style: TextStyle(
                               fontSize: 13,
@@ -4485,7 +5068,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Streak Days',
                             style: TextStyle(
                               fontSize: 13,
@@ -4509,7 +5092,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 14),
 
                 // Optional new PIN
-                const Text(
+                Text(
                   'Set New PIN (Leave blank to keep current)',
                   style: TextStyle(
                     fontSize: 13,
@@ -4531,7 +5114,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                 const SizedBox(height: 14),
 
                 // Role Selector
-                const Text(
+                Text(
                   'Account Role',
                   style: TextStyle(
                     fontSize: 13,
@@ -4577,7 +5160,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                         selected: selectedRole == 'admin',
                         onSelected: (_) =>
                             setSheetState(() => selectedRole = 'admin'),
-                        selectedColor: const Color(0xFFFEF3C7),
+                        selectedColor: AppColors.warningBg,
                         side: BorderSide(
                           color: selectedRole == 'admin'
                               ? AppColors.warning
@@ -4598,7 +5181,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
                     'Verified Scholar Badge',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                   ),
-                  subtitle: const Text(
+                  subtitle: Text(
                     'Grants official student verification checkmark in class',
                     style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                   ),
@@ -4698,7 +5281,7 @@ class _AdminManagementScreenState extends ConsumerState<AdminManagementScreen>
           children: [
             Text(
               'Resetting PIN for ${user.name} ($identifier).',
-              style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
+              style: TextStyle(fontSize: 13, color: AppColors.textPrimary),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -4818,7 +5401,7 @@ class _AdminSlotCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
         boxShadow: AppShadows.card,
@@ -4837,7 +5420,7 @@ class _AdminSlotCard extends StatelessWidget {
               children: [
                 Text(
                   slot.formattedStartTime,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
                     color: AppColors.primary,
@@ -4845,7 +5428,7 @@ class _AdminSlotCard extends StatelessWidget {
                 ),
                 Text(
                   slot.formattedEndTime,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
                     color: AppColors.textSecondary,
                     fontWeight: FontWeight.w600,
@@ -4885,7 +5468,7 @@ class _AdminSlotCard extends StatelessWidget {
                         slot.defaultRoom,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           color: AppColors.textSecondary,
                           fontWeight: FontWeight.w600,
@@ -4899,7 +5482,7 @@ class _AdminSlotCard extends StatelessWidget {
                   subject.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
@@ -4907,7 +5490,7 @@ class _AdminSlotCard extends StatelessWidget {
                 ),
                 Text(
                   subject.professor,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     color: AppColors.textSecondary,
                   ),
@@ -4927,7 +5510,7 @@ class _AdminSlotCard extends StatelessWidget {
                         border: Border.all(
                             color: AppColors.primary.withValues(alpha: 0.25)),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(Icons.video_call_rounded,
@@ -4955,7 +5538,7 @@ class _AdminSlotCard extends StatelessWidget {
 
           // Quick actions
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded,
+            icon: Icon(Icons.more_vert_rounded,
                 color: AppColors.textSecondary),
             onSelected: (val) {
               if (val == 'edit') onEdit();
@@ -4974,7 +5557,7 @@ class _AdminSlotCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'edit',
                 child: Row(
                   children: [
@@ -5022,7 +5605,7 @@ class _AdminSubjectCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
         boxShadow: AppShadows.card,
@@ -5064,7 +5647,7 @@ class _AdminSubjectCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       '$slotCount weekly lectures',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w500,
@@ -5075,7 +5658,7 @@ class _AdminSubjectCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   subject.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
                     color: AppColors.textPrimary,
@@ -5084,7 +5667,7 @@ class _AdminSubjectCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   '${subject.professor} • Min target: ${subject.minAttendancePct}%',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     color: AppColors.textSecondary,
                   ),
@@ -5094,7 +5677,7 @@ class _AdminSubjectCard extends StatelessWidget {
           ),
 
           IconButton(
-            icon: const Icon(Icons.edit_rounded,
+            icon: Icon(Icons.edit_rounded,
                 size: 20, color: AppColors.primary),
             onPressed: onEdit,
           ),
@@ -5143,7 +5726,7 @@ class _AdminOverrideCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isCancelled
@@ -5164,7 +5747,7 @@ class _AdminOverrideCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: isCancelled
                       ? AppColors.danger.withValues(alpha: 0.1)
-                      : const Color(0xFFFEF3C7),
+                      : AppColors.warningBg,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Row(
@@ -5191,7 +5774,7 @@ class _AdminOverrideCard extends StatelessWidget {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded,
+                icon: Icon(Icons.delete_outline_rounded,
                     size: 18, color: AppColors.textSecondary),
                 onPressed: onDelete,
               ),
@@ -5202,7 +5785,7 @@ class _AdminOverrideCard extends StatelessWidget {
             subject != null
                 ? '${subject.code} - ${subject.name}'
                 : 'Lecture Slot #${dailyOverride.slotId}',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w800,
               color: AppColors.textPrimary,
@@ -5212,7 +5795,7 @@ class _AdminOverrideCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               'Scheduled: ${slot.formattedTimeRange} (Orig: ${slot.defaultRoom})',
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 11, color: AppColors.textSecondary),
             ),
           ],
@@ -5220,11 +5803,11 @@ class _AdminOverrideCard extends StatelessWidget {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Icon(Icons.calendar_today_rounded, size: 13, color: AppColors.primary),
+                Icon(Icons.calendar_today_rounded, size: 13, color: AppColors.primary),
                 const SizedBox(width: 4),
                 Text(
                   'Rescheduled Date: ${dailyOverride.rescheduledDate!.year}-${dailyOverride.rescheduledDate!.month.toString().padLeft(2, '0')}-${dailyOverride.rescheduledDate!.day.toString().padLeft(2, '0')}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: AppColors.primary,
@@ -5254,11 +5837,11 @@ class _AdminOverrideCard extends StatelessWidget {
             const SizedBox(height: 4),
             Row(
               children: [
-                const Icon(Icons.room_rounded, size: 13, color: AppColors.textPrimary),
+                Icon(Icons.room_rounded, size: 13, color: AppColors.textPrimary),
                 const SizedBox(width: 4),
                 Text(
                   'Relocated To: ${dailyOverride.actualRoom}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
@@ -5271,7 +5854,7 @@ class _AdminOverrideCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               'Notice: "${dailyOverride.topicCovered}"',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
                 color: AppColors.textSecondary,
@@ -5296,7 +5879,7 @@ class _AdminOverrideCard extends StatelessWidget {
                   border: Border.all(
                       color: AppColors.primary.withValues(alpha: 0.25)),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.video_call_rounded,
@@ -5328,11 +5911,13 @@ class _AdminModResourceCard extends StatelessWidget {
   final ResourceModel resource;
   final VoidCallback onApprove;
   final VoidCallback onReject;
+  final VoidCallback? onEdit;
 
   const _AdminModResourceCard({
     required this.resource,
     required this.onApprove,
     required this.onReject,
+    this.onEdit,
   });
 
   @override
@@ -5340,7 +5925,7 @@ class _AdminModResourceCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
@@ -5352,7 +5937,7 @@ class _AdminModResourceCard extends StatelessWidget {
               color: AppColors.primarySoft,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.picture_as_pdf_rounded,
+            child: Icon(resource.type.icon,
                 color: AppColors.primary, size: 22),
           ),
           const SizedBox(width: 12),
@@ -5364,25 +5949,34 @@ class _AdminModResourceCard extends StatelessWidget {
                   resource.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
                   ),
                 ),
                 Text(
                   'By ${resource.uploaderName}',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 11, color: AppColors.textSecondary),
                 ),
               ],
             ),
           ),
+          if (onEdit != null)
+            IconButton(
+              tooltip: 'Edit Submission',
+              icon: Icon(Icons.edit_outlined, color: AppColors.primary),
+              onPressed: onEdit,
+            ),
           IconButton(
+            tooltip: 'Approve Submission',
             icon: const Icon(Icons.check_circle_rounded,
                 color: AppColors.success),
             onPressed: onApprove,
           ),
           IconButton(
+            tooltip: 'Reject & Delete Submission',
             icon: const Icon(Icons.cancel_rounded, color: AppColors.danger),
             onPressed: onReject,
           ),
@@ -5395,22 +5989,64 @@ class _AdminModResourceCard extends StatelessWidget {
 class _AdminModOverrideCard extends StatelessWidget {
   final DailyOverrideModel dailyOverride;
   final List<SubjectModel> subjects;
+  final List<TimetableSlotModel> slots;
+  final List<UserModel> users;
   final VoidCallback onApprove;
   final VoidCallback onReject;
 
   const _AdminModOverrideCard({
     required this.dailyOverride,
     required this.subjects,
+    required this.slots,
+    required this.users,
     required this.onApprove,
     required this.onReject,
   });
 
+  String _resolveReporterLabel() {
+    if (dailyOverride.reportedByName != null &&
+        dailyOverride.reportedByName!.trim().isNotEmpty) {
+      return dailyOverride.reportedByName!.trim();
+    }
+    final reporterId = dailyOverride.reportedBy;
+    if (reporterId != null && reporterId.isNotEmpty) {
+      final normReporter = UuidUtil.fromString(reporterId);
+      final match = users.cast<UserModel?>().firstWhere(
+            (u) =>
+                u != null &&
+                (u.id == reporterId || UuidUtil.fromString(u.id) == normReporter),
+            orElse: () => null,
+          );
+      if (match != null) {
+        final roll = match.rollNo?.trim();
+        return (roll != null && roll.isNotEmpty)
+            ? '${match.name} ($roll)'
+            : match.name;
+      }
+      return 'User #${reporterId.substring(0, reporterId.length.clamp(0, 8))}';
+    }
+    return 'Unknown Student';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final targetSlotUuid = UuidUtil.fromString(dailyOverride.slotId);
+    final slot = slots.cast<TimetableSlotModel?>().firstWhere(
+          (s) =>
+              s != null &&
+              (s.id == dailyOverride.slotId ||
+                  UuidUtil.fromString(s.id) == targetSlotUuid),
+          orElse: () => null,
+        );
+    final subject = slot != null
+        ? resolveSubjectById(subjects, slot.subjectId)
+        : null;
+    final reporterLabel = _resolveReporterLabel();
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
@@ -5419,7 +6055,7 @@ class _AdminModOverrideCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFFEF3C7),
+              color: AppColors.warningBg,
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(Icons.flag_rounded,
@@ -5431,11 +6067,45 @@ class _AdminModOverrideCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Report: ${dailyOverride.status.label}',
+                  subject != null
+                      ? '${subject.code} - ${subject.name}'
+                      : 'Report: ${dailyOverride.status.label}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                   ),
+                ),
+                Text(
+                  '${dailyOverride.status.label}${slot != null ? ' • Orig: ${slot.formattedTimeRange}' : ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(Icons.person_outline_rounded,
+                        size: 12, color: AppColors.primary),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        'Requested by: $reporterLabel',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 if (dailyOverride.actualStartTime != null || dailyOverride.actualRoom != null || dailyOverride.rescheduledDate != null)
                   Text(
@@ -5457,7 +6127,7 @@ class _AdminModOverrideCard extends StatelessWidget {
                     dailyOverride.topicCovered!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 11, color: AppColors.textSecondary),
                   ),
               ],

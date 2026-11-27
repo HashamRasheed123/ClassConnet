@@ -17,7 +17,6 @@ class TimetableScreen extends ConsumerStatefulWidget {
 
 class _TimetableScreenState extends ConsumerState<TimetableScreen> {
   int _selectedDay = 1; // 1 = Monday ... 6 = Saturday
-  int _currentTab = 0; // 0 = Schedule, 1 = Timetable Sheet Image, 2 = Bunk Radar
 
   static const List<Map<String, dynamic>> _days = [
     {'day': 1, 'label': 'Mon', 'fullName': 'Monday'},
@@ -43,9 +42,9 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
     final user = ref.watch(currentUserProvider);
     final allSlots = ref.watch(timetableSlotsProvider);
     final subjects = ref.watch(subjectsProvider);
-    // ignore: unused_local_variable
     final attendanceMap = ref.watch(attendanceProvider);
     final overrides = ref.watch(dailyOverridesProvider);
+    final currentTab = ref.watch(timetableSubTabProvider);
 
     final filteredSlots =
         allSlots.where((s) => s.dayOfWeek == _selectedDay).toList()
@@ -55,7 +54,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
         _days.firstWhere((d) => d['day'] == _selectedDay)['fullName'] as String;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.palette.background,
       appBar: AppBar(
         title: const Text('Timetable & Attendance'),
         actions: [
@@ -74,7 +73,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                 );
               },
             ),
-          // 2-Way Mode Switcher: Daily Schedule & Official Sheet Image (Bunk Radar moved to Future Updates)
+          // 3-Way Mode Switcher: Daily Schedule, Official Sheet Image, & Bunk Radar
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: SegmentedButton<int>(
@@ -90,10 +89,15 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                   icon: Icon(Icons.image_rounded, size: 16),
                   tooltip: 'Official Timetable Sheet',
                 ),
+                ButtonSegment<int>(
+                  value: 2,
+                  icon: Icon(Icons.radar_rounded, size: 16),
+                  tooltip: 'Attendance & Safe-Bunk',
+                ),
               ],
-              selected: {_currentTab > 1 ? 0 : _currentTab},
+              selected: {currentTab},
               onSelectionChanged: (set) =>
-                  setState(() => _currentTab = set.first),
+                  ref.read(timetableSubTabProvider.notifier).setTab(set.first),
               style: ButtonStyle(
                 visualDensity: VisualDensity.compact,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -105,7 +109,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
           ),
         ],
       ),
-      floatingActionButton: (user.isAdmin && _currentTab == 0)
+      floatingActionButton: (user.isAdmin && currentTab == 0)
           ? FloatingActionButton.extended(
               heroTag: null,
               onPressed: () => _openSlotFormDialog(context, subjects),
@@ -114,7 +118,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
             )
-          : (user.isAdmin && _currentTab == 1)
+          : (user.isAdmin && currentTab == 1)
               ? FloatingActionButton.extended(
                   heroTag: null,
                   onPressed: () => _showUpdateTimetableImageDialog(context),
@@ -126,15 +130,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
               : null,
       body: SafeArea(
         bottom: false,
-        child: _currentTab == 1
-            ? _buildOfficialTimetableImageView(user.isAdmin)
-            : _buildTimetableGridView(
-                filteredSlots,
-                subjects,
-                selectedDayName,
-                user.isAdmin,
-                overrides,
-              ),
+        child: currentTab == 2
+            ? _buildBunkRadarView(subjects, attendanceMap)
+            : currentTab == 1
+                ? _buildOfficialTimetableImageView(user.isAdmin)
+                : _buildTimetableGridView(
+                    filteredSlots,
+                    subjects,
+                    selectedDayName,
+                    user.isAdmin,
+                    overrides,
+                  ),
       ),
     );
   }
@@ -215,7 +221,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
             children: [
               Text(
                 '$dayName Schedule',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary,
@@ -225,7 +231,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                 children: [
                   Text(
                     '${slots.length} Lectures',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textSecondary,
                       fontWeight: FontWeight.w600,
@@ -245,7 +251,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: const [
+                          children: [
                             Icon(Icons.add_rounded,
                                 size: 14, color: AppColors.primary),
                             SizedBox(width: 2),
@@ -275,12 +281,12 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.event_busy_rounded,
+                      Icon(Icons.event_busy_rounded,
                           size: 44, color: AppColors.border),
                       const SizedBox(height: 10),
                       Text(
                         'No lectures scheduled on $dayName.',
-                        style: const TextStyle(color: AppColors.textSecondary),
+                        style: TextStyle(color: AppColors.textSecondary),
                       ),
                       if (isAdmin) ...[
                         const SizedBox(height: 14),
@@ -323,9 +329,9 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                     return Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: AppColors.surface,
+                        color: context.palette.cardSurface,
                         borderRadius: BorderRadius.circular(AppRadii.card),
-                        border: Border.all(color: AppColors.border),
+                        border: Border.all(color: context.palette.border),
                         boxShadow: AppShadows.card,
                       ),
                       child: Row(
@@ -339,7 +345,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                               children: [
                                 Text(
                                   slot.formattedStartTime,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w800,
                                     color: AppColors.textPrimary,
@@ -347,7 +353,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                 ),
                                 Text(
                                   slot.formattedEndTime,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
                                     color: AppColors.textSecondary,
                                     fontWeight: FontWeight.w600,
@@ -396,7 +402,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                       child: Row(
                                         mainAxisAlignment: MainAxisAlignment.end,
                                         children: [
-                                          const Icon(Icons.room_outlined,
+                                          Icon(Icons.room_outlined,
                                               size: 13,
                                               color: AppColors.textSecondary),
                                           const SizedBox(width: 3),
@@ -405,7 +411,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                               slot.defaultRoom,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.w600,
                                                 color: AppColors.textSecondary,
@@ -420,7 +426,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                 const SizedBox(height: 6),
                                 Text(
                                   subject.name,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700,
                                     color: AppColors.textPrimary,
@@ -429,7 +435,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                 const SizedBox(height: 3),
                                 Text(
                                   subject.professor,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
                                     color: AppColors.textSecondary,
                                   ),
@@ -444,7 +450,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                               OverrideStatus.cancelled
                                           ? AppColors.danger
                                               .withValues(alpha: 0.1)
-                                          : const Color(0xFFFEF3C7),
+                                          : AppColors.warningBg,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Row(
@@ -505,7 +511,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                               .withValues(alpha: 0.25),
                                         ),
                                       ),
-                                      child: const Row(
+                                      child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Icon(Icons.video_call_rounded,
@@ -536,7 +542,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           // Admin Action Menu
                           if (isAdmin)
                             PopupMenuButton<String>(
-                              icon: const Icon(Icons.more_vert_rounded,
+                              icon: Icon(Icons.more_vert_rounded,
                                   color: AppColors.textSecondary, size: 20),
                               padding: EdgeInsets.zero,
                               onSelected: (val) {
@@ -562,7 +568,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                     ],
                                   ),
                                 ),
-                                const PopupMenuItem(
+                                PopupMenuItem(
                                   value: 'edit',
                                   child: Row(
                                     children: [
@@ -644,8 +650,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                 20,
                 MediaQuery.of(context).viewInsets.bottom + 24,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
+              decoration: BoxDecoration(
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: SingleChildScrollView(
@@ -670,7 +676,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       children: [
                         Text(
                           isEditing ? 'Edit Lecture Slot' : 'Add Timetable Slot',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
@@ -684,7 +690,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    const Text(
+                    Text(
                       'Course / Subject',
                       style: TextStyle(
                         fontSize: 13,
@@ -696,7 +702,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: AppColors.surfaceSubtle,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: AppColors.border),
                       ),
@@ -741,7 +747,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    const Text(
+                    Text(
                       'Day of Week',
                       style: TextStyle(
                         fontSize: 13,
@@ -783,7 +789,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Start Time',
                                 style: TextStyle(
                                   fontSize: 13,
@@ -815,7 +821,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF8FAFC),
+                                    color: AppColors.surfaceSubtle,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(color: AppColors.border),
                                   ),
@@ -830,7 +836,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                           fontSize: 14,
                                         ),
                                       ),
-                                      const Icon(Icons.access_time_rounded,
+                                      Icon(Icons.access_time_rounded,
                                           size: 16,
                                           color: AppColors.textSecondary),
                                     ],
@@ -845,7 +851,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'End Time',
                                 style: TextStyle(
                                   fontSize: 13,
@@ -877,7 +883,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF8FAFC),
+                                    color: AppColors.surfaceSubtle,
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(color: AppColors.border),
                                   ),
@@ -892,7 +898,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                           fontSize: 14,
                                         ),
                                       ),
-                                      const Icon(Icons.access_time_rounded,
+                                      Icon(Icons.access_time_rounded,
                                           size: 16,
                                           color: AppColors.textSecondary),
                                     ],
@@ -906,7 +912,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    const Text(
+                    Text(
                       'Default Room / Hall',
                       style: TextStyle(
                         fontSize: 13,
@@ -921,16 +927,16 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                         hintText: 'e.g. Hall A-102, Lab 3, Online',
                         prefixIcon: const Icon(Icons.room_outlined, size: 18),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppColors.border),
+                          borderSide: BorderSide(color: AppColors.border),
                         ),
                       ),
                     ),
                     const SizedBox(height: 14),
 
-                    const Text(
+                    Text(
                       'Meeting / Online Class URL (Optional)',
                       style: TextStyle(
                         fontSize: 13,
@@ -948,10 +954,10 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                         prefixIcon:
                             const Icon(Icons.video_call_rounded, size: 20),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppColors.border),
+                          borderSide: BorderSide(color: AppColors.border),
                         ),
                       ),
                     ),
@@ -1141,8 +1147,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                 20,
                 MediaQuery.of(context).viewInsets.bottom + 24,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
+              decoration: BoxDecoration(
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: SingleChildScrollView(
@@ -1164,7 +1170,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
 
                     Text(
                       'Broadcast Override: ${subject.code}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
@@ -1172,12 +1178,12 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                     ),
                     Text(
                       'Regular: ${slot.formattedTimeRange} • ${slot.defaultRoom}',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 12, color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 16),
 
-                    const Text(
+                    Text(
                       'Action Type',
                       style: TextStyle(
                           fontSize: 13,
@@ -1233,7 +1239,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
 
                     if (status == OverrideStatus.rescheduled) ...[
                       // Reschedule Date / Day
-                      const Text(
+                      Text(
                         'Meeting Day / Date',
                         style: TextStyle(
                             fontSize: 13,
@@ -1257,25 +1263,25 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
+                            color: AppColors.surfaceSubtle,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: AppColors.border),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
+                              Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   '${_dayNameFromWeekday(selectedDate.weekday)}, ${selectedDate.day} ${_monthName(selectedDate.month)} ${selectedDate.year}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w700,
                                     color: AppColors.textPrimary,
                                   ),
                                 ),
                               ),
-                              const Icon(Icons.arrow_drop_down_rounded, color: AppColors.textSecondary),
+                              Icon(Icons.arrow_drop_down_rounded, color: AppColors.textSecondary),
                             ],
                           ),
                         ),
@@ -1301,7 +1307,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                   ),
                                   backgroundColor: selectedDate.weekday == (d['day'] as int)
                                       ? AppColors.primary
-                                      : const Color(0xFFF1F5F9),
+                                      : AppColors.surfaceMuted,
                                   onPressed: () {
                                     final targetW = d['day'] as int;
                                     final now = DateTime.now();
@@ -1320,7 +1326,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       const SizedBox(height: 14),
 
                       // Meeting Time (Start & End)
-                      const Text(
+                      Text(
                         'Meeting Time (Start & End)',
                         style: TextStyle(
                             fontSize: 13,
@@ -1349,19 +1355,19 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF8FAFC),
+                                  color: AppColors.surfaceSubtle,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: AppColors.border),
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.access_time_rounded, size: 18, color: AppColors.primary),
+                                    Icon(Icons.access_time_rounded, size: 18, color: AppColors.primary),
                                     const SizedBox(width: 8),
                                     Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        const Text('Start Time', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                                        Text(Formatters.formatTimeString(startTime), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                                        Text('Start Time', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                                        Text(Formatters.formatTimeString(startTime), style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
                                       ],
                                     ),
                                   ],
@@ -1389,7 +1395,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF8FAFC),
+                                  color: AppColors.surfaceSubtle,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: AppColors.border),
                                 ),
@@ -1400,8 +1406,8 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                     Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        const Text('End Time', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                                        Text(Formatters.formatTimeString(endTime), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                                        Text('End Time', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                                        Text(Formatters.formatTimeString(endTime), style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
                                       ],
                                     ),
                                   ],
@@ -1419,7 +1425,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
                         dense: true,
-                        title: const Text(
+                        title: Text(
                           'Also update permanent weekly timetable slot',
                           style: TextStyle(
                             fontSize: 12.5,
@@ -1431,7 +1437,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       const SizedBox(height: 8),
 
                       // Room / Venue
-                      const Text(
+                      Text(
                         'Room / Venue',
                         style: TextStyle(
                             fontSize: 13,
@@ -1445,17 +1451,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           hintText: 'e.g. CS Lab 5 (2nd Floor)',
                           prefixIcon: const Icon(Icons.room_rounded, size: 18),
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppColors.surfaceSubtle,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.border),
+                            borderSide: BorderSide(color: AppColors.border),
                           ),
                         ),
                       ),
                       const SizedBox(height: 14),
 
                       // Meeting / Online Class URL (Optional)
-                      const Text(
+                      Text(
                         'Meeting / Online Class URL (Optional)',
                         style: TextStyle(
                             fontSize: 13,
@@ -1472,17 +1478,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                           prefixIcon:
                               const Icon(Icons.video_call_rounded, size: 20),
                           filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
+                          fillColor: AppColors.surfaceSubtle,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.border),
+                            borderSide: BorderSide(color: AppColors.border),
                           ),
                         ),
                       ),
                       const SizedBox(height: 14),
                     ],
 
-                    const Text(
+                    Text(
                       'Announcement / Reason (Optional)',
                       style: TextStyle(
                           fontSize: 13,
@@ -1497,10 +1503,10 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                             ? 'e.g. Professor attending conference'
                             : 'e.g. Extra prep session or Midterm shift',
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: AppColors.surfaceSubtle,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppColors.border),
+                          borderSide: BorderSide(color: AppColors.border),
                         ),
                       ),
                     ),
@@ -1637,14 +1643,14 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                   color: AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(24),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.image_search_rounded,
                   size: 40,
                   color: AppColors.primary,
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'No Timetable Sheet Published',
                 style: TextStyle(
                   fontSize: 18,
@@ -1653,7 +1659,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'The administrator has not uploaded the official class timetable image yet.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -1662,22 +1668,46 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                   height: 1.4,
                 ),
               ),
-              if (isAdmin) ...[
-                const SizedBox(height: 20),
-                FilledButton.icon(
-                  onPressed: () => _showUpdateTimetableImageDialog(context),
-                  icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-                  label: const Text('Set Google Drive Timetable Image'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                alignment: WrapAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      await ref
+                          .read(timetableImageUrlProvider.notifier)
+                          .refreshFromCloud();
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Checked cloud for published timetable.'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Refresh from Cloud'),
                   ),
-                ),
-              ],
+                  if (isAdmin)
+                    FilledButton.icon(
+                      onPressed: () => _showUpdateTimetableImageDialog(context),
+                      icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+                      label: const Text('Set Google Drive Timetable Image'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                      ),
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -1691,16 +1721,16 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
+            color: AppColors.surfaceMuted,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.border),
           ),
           child: Row(
             children: [
-              const Icon(Icons.zoom_in_rounded,
+              Icon(Icons.zoom_in_rounded,
                   size: 18, color: AppColors.primary),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Pinch to zoom • Drag to navigate timetable sheet',
                   style: TextStyle(
@@ -1708,6 +1738,17 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                       fontWeight: FontWeight.w600,
                       color: AppColors.textSecondary),
                 ),
+              ),
+              IconButton(
+                tooltip: 'Refresh from Cloud',
+                icon: Icon(Icons.refresh_rounded,
+                    size: 17, color: AppColors.primary),
+                visualDensity: VisualDensity.compact,
+                onPressed: () async {
+                  await ref
+                      .read(timetableImageUrlProvider.notifier)
+                      .refreshFromCloud();
+                },
               ),
               if (isAdmin)
                 TextButton.icon(
@@ -1731,7 +1772,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
           child: Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.cardSurface,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.border),
               boxShadow: [
@@ -1763,7 +1804,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                         children: [
                           CircularProgressIndicator(value: pct),
                           const SizedBox(height: 12),
-                          const Text(
+                          Text(
                             'Streaming timetable sheet from Google Drive...',
                             style: TextStyle(
                                 fontSize: 12, color: AppColors.textSecondary),
@@ -1787,7 +1828,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                                 fontWeight: FontWeight.w700, fontSize: 13),
                           ),
                           const SizedBox(height: 4),
-                          const Text(
+                          Text(
                             'Please ensure file access in Google Drive is set to "Anyone with the link can view".',
                             textAlign: TextAlign.center,
                             style: TextStyle(
@@ -1823,7 +1864,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
       context: context,
       builder: (dlgCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
             Icon(Icons.add_photo_alternate_rounded, color: AppColors.primary),
             SizedBox(width: 10),
@@ -1835,7 +1876,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Paste the Google Drive sharing link of your official timetable image. Make sure file access is set to "Anyone with the link can view":',
               style: TextStyle(
                   fontSize: 12, color: AppColors.textSecondary, height: 1.4),
@@ -1848,7 +1889,7 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                 hintText: 'https://drive.google.com/file/d/...',
                 prefixIcon: const Icon(Icons.link_rounded, size: 20),
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -1863,10 +1904,19 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
           if (currentUrl.isNotEmpty)
             TextButton(
               onPressed: () async {
-                await ref.read(timetableImageUrlProvider.notifier).clearImage();
+                final err = await ref
+                    .read(timetableImageUrlProvider.notifier)
+                    .clearImage();
                 if (dlgCtx.mounted) Navigator.pop(dlgCtx);
                 messenger.showSnackBar(
-                  const SnackBar(content: Text('Timetable image removed.')),
+                  SnackBar(
+                    content: Text(
+                      err == null
+                          ? 'Timetable image removed across all student devices.'
+                          : 'Removed locally (Cloud sync pending: $err)',
+                    ),
+                    backgroundColor: err == null ? null : AppColors.warning,
+                  ),
                 );
               },
               style: TextButton.styleFrom(foregroundColor: AppColors.danger),
@@ -1882,15 +1932,19 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
                 );
                 return;
               }
-              await ref
+              final err = await ref
                   .read(timetableImageUrlProvider.notifier)
                   .updateImage(url);
               if (dlgCtx.mounted) Navigator.pop(dlgCtx);
               messenger.showSnackBar(
-                const SnackBar(
-                  content:
-                      Text('Official timetable image published successfully!'),
-                  backgroundColor: AppColors.success,
+                SnackBar(
+                  content: Text(
+                    err == null
+                        ? 'Official timetable published & synced to all students!'
+                        : 'Saved locally (Cloud sync pending: $err)',
+                  ),
+                  backgroundColor:
+                      err == null ? AppColors.success : AppColors.warning,
                 ),
               );
             },
@@ -1907,11 +1961,38 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
   // ===================================================================
 
 
-  // ignore: unused_element
   Widget _buildBunkRadarView(
     List<SubjectModel> subjects,
     Map<String, AttendanceRecord> attendanceMap,
   ) {
+    AttendanceRecord recordFor(String subjectId) {
+      if (attendanceMap.containsKey(subjectId)) return attendanceMap[subjectId]!;
+      final norm = UuidUtil.fromString(subjectId);
+      if (attendanceMap.containsKey(norm)) return attendanceMap[norm]!;
+      return AttendanceRecord(subjectId: subjectId, attended: 0, total: 0);
+    }
+
+    int totalAttended = 0;
+    int totalClasses = 0;
+    int safeCount = 0;
+    int dangerCount = 0;
+
+    for (final s in subjects) {
+      final rec = recordFor(s.id);
+      if (rec.total > 0) {
+        totalAttended += rec.attended;
+        totalClasses += rec.total;
+        if (rec.isSafe(s.minAttendancePct)) {
+          safeCount++;
+        } else {
+          dangerCount++;
+        }
+      }
+    }
+
+    final overallPct =
+        totalClasses == 0 ? 100.0 : (totalAttended / totalClasses) * 100.0;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
       children: [
@@ -1919,42 +2000,88 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.palette.cardSurface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
+            border: Border.all(color: context.palette.border),
             boxShadow: AppShadows.card,
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.radar_rounded,
-                    size: 24, color: AppColors.primary),
-              ),
-              const SizedBox(width: 14),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Attendance Radar (75% Safe Threshold)',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
-                      ),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySoft,
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Real-time bunk margin predictor. 1-tap Present / Absent logging.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
-                      ),
+                    child: Icon(Icons.radar_rounded,
+                        size: 24, color: AppColors.primary),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Attendance & Safe-Bunk Radar',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Tap Present or Absent after each lecture, or edit mid-semester counts anytime.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSubtle,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _RadarMetricPill(
+                      label: 'Overall',
+                      value: totalClasses == 0
+                          ? '--'
+                          : '${overallPct.toStringAsFixed(1)}%',
+                      color: totalClasses == 0
+                          ? AppColors.textSecondary
+                          : (overallPct >= 75
+                              ? AppColors.success
+                              : AppColors.danger),
+                    ),
+                    _RadarMetricPill(
+                      label: 'Logged',
+                      value: '$totalAttended / $totalClasses',
+                      color: AppColors.primary,
+                    ),
+                    _RadarMetricPill(
+                      label: 'Safe',
+                      value: '$safeCount',
+                      color: AppColors.success,
+                    ),
+                    _RadarMetricPill(
+                      label: 'Danger',
+                      value: '$dangerCount',
+                      color: AppColors.danger,
                     ),
                   ],
                 ),
@@ -1964,19 +2091,185 @@ class _TimetableScreenState extends ConsumerState<TimetableScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Subjects Attendance Cards
-        for (final subject in subjects) ...[
-          _AttendanceSubjectCard(
-            subject: subject,
-            record: attendanceMap[subject.id] ??
-                AttendanceRecord(subjectId: subject.id, attended: 0, total: 0),
-            onPresent: () =>
-                ref.read(attendanceProvider.notifier).markPresent(subject.id),
-            onAbsent: () =>
-                ref.read(attendanceProvider.notifier).markAbsent(subject.id),
+        if (subjects.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: context.palette.cardSurface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: context.palette.border),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.menu_book_rounded,
+                    size: 40, color: AppColors.textSecondary),
+                SizedBox(height: 10),
+                Text(
+                  'No Subjects Added Yet',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Ask your admin to add courses in the timetable to track attendance.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          // Subjects Attendance Cards
+          for (final subject in subjects) ...[
+            _AttendanceSubjectCard(
+              subject: subject,
+              record: recordFor(subject.id),
+              onPresent: () =>
+                  ref.read(attendanceProvider.notifier).markPresent(subject.id),
+              onAbsent: () =>
+                  ref.read(attendanceProvider.notifier).markAbsent(subject.id),
+              onEdit: () => _openEditAttendanceDialog(
+                context,
+                subject,
+                recordFor(subject.id),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+      ],
+    );
+  }
+
+  Future<void> _openEditAttendanceDialog(
+    BuildContext context,
+    SubjectModel subject,
+    AttendanceRecord record,
+  ) async {
+    final attendedCtrl = TextEditingController(text: '${record.attended}');
+    final totalCtrl = TextEditingController(text: '${record.total}');
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          'Edit ${subject.code} Attendance',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Enter your current semester totals for ${subject.name} (Target: ${subject.minAttendancePct}%).',
+              style: TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: attendedCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Attended',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: totalCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Total Held',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              ref
+                  .read(attendanceProvider.notifier)
+                  .resetSubjectAttendance(subject.id);
+              Navigator.pop(ctx);
+            },
+            child: const Text(
+              'Reset (0/0)',
+              style: TextStyle(color: AppColors.danger),
+            ),
           ),
-          const SizedBox(height: 12),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final rawAttended = int.tryParse(attendedCtrl.text.trim()) ?? 0;
+              final rawTotal = int.tryParse(totalCtrl.text.trim()) ?? 0;
+              final safeTotal = rawTotal < rawAttended ? rawAttended : rawTotal;
+              ref.read(attendanceProvider.notifier).setAttendance(
+                    subject.id,
+                    attended: rawAttended,
+                    total: safeTotal,
+                  );
+              Navigator.pop(ctx);
+            },
+            child: const Text('Save'),
+          ),
         ],
+      ),
+    );
+    attendedCtrl.dispose();
+    totalCtrl.dispose();
+  }
+}
+
+class _RadarMetricPill extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _RadarMetricPill({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w900,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary,
+          ),
+        ),
       ],
     );
   }
@@ -1987,41 +2280,35 @@ class _AttendanceSubjectCard extends StatelessWidget {
   final AttendanceRecord record;
   final VoidCallback onPresent;
   final VoidCallback onAbsent;
+  final VoidCallback onEdit;
 
   const _AttendanceSubjectCard({
     required this.subject,
     required this.record,
     required this.onPresent,
     required this.onAbsent,
+    required this.onEdit,
   });
 
   @override
   Widget build(BuildContext context) {
     final pct = record.percentage;
-    final isSafe = pct >= subject.minAttendancePct;
-    final margin = record.bunkAllowance(subject.minAttendancePct);
-
-    final statusColor = isSafe ? AppColors.success : AppColors.danger;
-
-    String adviceText;
-    if (isSafe) {
-      if (margin == 0) {
-        adviceText = 'On the edge! Missing the next lecture drops below 75%.';
-      } else {
-        adviceText = 'Safe: You can bunk $margin more lecture${margin == 1 ? '' : 's'} before hitting 75%.';
-      }
-    } else {
-      final needed = margin.abs();
-      adviceText = 'Danger: Attend the next $needed lecture${needed == 1 ? '' : 's'} consecutively to hit 75%.';
-    }
+    final hasLogs = record.total > 0;
+    final isSafe = record.isSafe(subject.minAttendancePct);
+    final statusColor = !hasLogs
+        ? AppColors.primary
+        : (isSafe ? AppColors.success : AppColors.danger);
+    final adviceText =
+        record.statusSummary(subject.name, subject.minAttendancePct);
+    final badgeLabel = !hasLogs ? 'NEW' : (isSafe ? 'SAFE' : 'DANGER');
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: context.palette.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isSafe ? AppColors.border : AppColors.danger.withValues(alpha: 0.35),
+          color: isSafe ? context.palette.border : AppColors.danger.withValues(alpha: 0.35),
           width: isSafe ? 1.0 : 1.3,
         ),
         boxShadow: AppShadows.card,
@@ -2053,7 +2340,7 @@ class _AttendanceSubjectCard extends StatelessWidget {
                   subject.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
@@ -2062,12 +2349,24 @@ class _AttendanceSubjectCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                '${pct.toStringAsFixed(1)}%',
+                hasLogs ? '${pct.toStringAsFixed(1)}%' : '--',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                   color: statusColor,
                 ),
+              ),
+              IconButton(
+                tooltip: 'Edit / Set Attendance Counts',
+                onPressed: onEdit,
+                icon: Icon(
+                  Icons.edit_outlined,
+                  size: 18,
+                  color: AppColors.textSecondary,
+                ),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.only(left: 4),
+                constraints: const BoxConstraints(),
               ),
             ],
           ),
@@ -2077,9 +2376,9 @@ class _AttendanceSubjectCard extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
-              value: pct / 100.0,
+              value: hasLogs ? (pct / 100.0).clamp(0.0, 1.0) : 0.0,
               minHeight: 8,
-              backgroundColor: const Color(0xFFF1F5F9),
+              backgroundColor: AppColors.surfaceMuted,
               valueColor: AlwaysStoppedAnimation<Color>(statusColor),
             ),
           ),
@@ -2090,8 +2389,8 @@ class _AttendanceSubjectCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Attended: ${record.attended} / ${record.total} classes',
-                style: const TextStyle(
+                'Attended: ${record.attended} / ${record.total} classes (Min ${subject.minAttendancePct}%)',
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textSecondary,
@@ -2104,7 +2403,7 @@ class _AttendanceSubjectCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  isSafe ? 'SAFE' : 'CRITICAL',
+                  badgeLabel,
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
@@ -2129,9 +2428,11 @@ class _AttendanceSubjectCard extends StatelessWidget {
             child: Row(
               children: [
                 Icon(
-                  isSafe
-                      ? Icons.check_circle_outline_rounded
-                      : Icons.warning_amber_rounded,
+                  !hasLogs
+                      ? Icons.info_outline_rounded
+                      : (isSafe
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.warning_amber_rounded),
                   size: 15,
                   color: statusColor,
                 ),
@@ -2181,7 +2482,7 @@ class _AttendanceSubjectCard extends StatelessWidget {
                   icon: const Icon(Icons.close_rounded,
                       size: 16, color: AppColors.danger),
                   label: const Text(
-                    'Absent (-1)',
+                    'Absent',
                     style: TextStyle(
                       color: AppColors.danger,
                       fontWeight: FontWeight.w700,

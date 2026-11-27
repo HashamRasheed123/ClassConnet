@@ -190,7 +190,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             Expanded(child: Text(msg)),
           ],
         ),
-        backgroundColor: isError ? AppColors.danger : AppColors.textPrimary,
+        backgroundColor: isError ? AppColors.danger : AppColors.snackBarBg,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -198,8 +198,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -217,7 +218,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       borderRadius: BorderRadius.circular(22),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF6366F1).withValues(alpha: 0.35),
+                          color: AppColors.primary.withValues(alpha: 0.35),
                           blurRadius: 22,
                           offset: const Offset(0, 8),
                         ),
@@ -233,7 +234,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Center(
+                Center(
                   child: Text(
                     KzynovexBranding.appName,
                     style: TextStyle(
@@ -245,7 +246,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                const Center(
+                Center(
                   child: Text(
                     'Academic Companion & Timetable Hub',
                     style: TextStyle(
@@ -261,29 +262,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: AppColors.cardSurface,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    border: Border.all(color: AppColors.border),
                   ),
                   child: Column(
                     children: [
                       _buildFeatureRow(
                         icon: Icons.calendar_today_rounded,
-                        color: const Color(0xFF6366F1),
+                        color: AppColors.primary,
                         title: 'Live Weekly Timetables',
                         subtitle: 'Real-time lectures, room changes & alerts',
                       ),
                       const SizedBox(height: 14),
                       _buildFeatureRow(
                         icon: Icons.folder_special_rounded,
-                        color: const Color(0xFF059669),
+                        color: AppColors.success,
                         title: 'Verified Study Notes Vault',
                         subtitle: 'Upload requests reviewed by faculty & CRs',
                       ),
                       const SizedBox(height: 14),
                       _buildFeatureRow(
                         icon: Icons.radar_rounded,
-                        color: const Color(0xFFEA580C),
+                        color: AppColors.warning,
                         title: 'Smart Bunk Radar',
                         subtitle: 'Calculated attendance & lecture tracking',
                       ),
@@ -301,13 +302,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   child: ElevatedButton(
                     onPressed: _loginLoading ? null : _handleNativeGoogleSignIn,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF1E293B),
+                      backgroundColor: AppColors.cardSurface,
+                      foregroundColor: AppColors.textPrimary,
                       elevation: 2,
                       shadowColor: Colors.black.withValues(alpha: 0.15),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
-                        side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
+                        side: BorderSide(color: AppColors.borderStrong, width: 1.2),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                     ),
@@ -322,12 +323,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             children: [
                               _buildGoogleGLogo(size: 24),
                               const SizedBox(width: 12),
-                              const Text(
+                              Text(
                                 'Continue with Google',
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
-                                  color: Color(0xFF1E293B),
+                                  color: AppColors.textPrimary,
                                   letterSpacing: -0.2,
                                 ),
                               ),
@@ -344,15 +345,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Center(
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.lock_rounded, size: 13, color: Color(0xFF94A3B8)),
-                      SizedBox(width: 6),
+                    children: [
+                      Icon(Icons.lock_rounded, size: 13, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
                       Text(
                         'Secure OAuth 2.0 Academic Authentication',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFF94A3B8),
+                          color: AppColors.textSecondary,
                         ),
                       ),
                     ],
@@ -390,7 +391,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             children: [
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: AppColors.textPrimary,
@@ -398,7 +399,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
               Text(
                 subtitle,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   color: AppColors.textSecondary,
                 ),

@@ -6,11 +6,14 @@ import '../../core/constants/kzynovex_branding.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/utils/uuid_util.dart';
 import '../../core/widgets/admin_passcode_dialog.dart';
 import '../../models/models.dart';
 import '../../providers/class_providers.dart';
 import '../admin/admin_management_screen.dart';
 import '../auth/login_screen.dart';
+import '../bounties/note_bounties_screen.dart';
+import '../cosmetics/cosmetics_store_screen.dart';
 import '../../core/services/alert_scheduler.dart';
 import '../../core/services/update_service.dart';
 
@@ -31,9 +34,12 @@ class ProfileScreen extends ConsumerWidget {
     final users = ref.watch(usersListProvider);
     final updateState = ref.watch(updateStateProvider);
     final alertMode = ref.watch(alertModeProvider);
+    final cosmetics = ref.watch(cosmeticsProvider);
+    final verificationReqs = ref.watch(studentVerificationRequestsProvider);
+    final palette = context.palette;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: palette.background,
       appBar: AppBar(
         title: const Text('Profile & Settings'),
         actions: [
@@ -68,9 +74,9 @@ class ProfileScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: palette.cardSurface,
                 borderRadius: BorderRadius.circular(AppRadii.card),
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: palette.border),
                 boxShadow: AppShadows.card,
               ),
               child: Column(
@@ -82,7 +88,7 @@ class ProfileScreen extends ConsumerWidget {
                         width: 56,
                         height: 56,
                         decoration: BoxDecoration(
-                          gradient: AppColors.brandGradient,
+                          gradient: palette.heroGradient,
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Center(
@@ -111,7 +117,7 @@ class ProfileScreen extends ConsumerWidget {
                                     user.name,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w800,
                                       color: AppColors.textPrimary,
@@ -120,7 +126,7 @@ class ProfileScreen extends ConsumerWidget {
                                 ),
                                 if (user.isKzynovexVerified) ...[
                                   const SizedBox(width: 4),
-                                  const Icon(Icons.verified_rounded,
+                                  Icon(Icons.verified_rounded,
                                       size: 16, color: AppColors.primary),
                                 ],
                                 const Spacer(),
@@ -132,12 +138,12 @@ class ProfileScreen extends ConsumerWidget {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFF1F5F9),
+                                      color: AppColors.surfaceMuted,
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
-                                      children: const [
+                                      children: [
                                         Icon(Icons.edit_rounded,
                                             size: 12,
                                             color: AppColors.textSecondary),
@@ -159,7 +165,7 @@ class ProfileScreen extends ConsumerWidget {
                             const SizedBox(height: 2),
                             Text(
                               user.email,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
                                 color: AppColors.textSecondary,
                               ),
@@ -168,7 +174,7 @@ class ProfileScreen extends ConsumerWidget {
                               const SizedBox(height: 2),
                               Text(
                                 'Roll No: ${user.rollNo}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   color: AppColors.primary,
@@ -185,7 +191,7 @@ class ProfileScreen extends ConsumerWidget {
                                       horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: user.isAdmin
-                                        ? const Color(0xFFFEF3C7)
+                                        ? AppColors.warningBg
                                         : AppColors.primarySoft,
                                     borderRadius: BorderRadius.circular(999),
                                   ),
@@ -209,10 +215,10 @@ class ProfileScreen extends ConsumerWidget {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF1F5F9),
+                                    color: AppColors.surfaceMuted,
                                     borderRadius: BorderRadius.circular(999),
                                   ),
-                                  child: const Row(
+                                  child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
@@ -248,9 +254,13 @@ class ProfileScreen extends ConsumerWidget {
                     children: [
                       Expanded(
                         child: _buildStatItem(
-                          label: 'Academic Credits',
+                          label: (!user.isKzynovexVerified && !user.isAdmin)
+                              ? 'Credits (Verify to Use)'
+                              : 'Academic Credits',
                           value: '${user.credits} pts',
-                          color: AppColors.primary,
+                          color: (!user.isKzynovexVerified && !user.isAdmin)
+                              ? AppColors.warning
+                              : AppColors.primary,
                         ),
                       ),
                       Container(
@@ -272,6 +282,142 @@ class ProfileScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 18),
 
+            // VERIFIED STUDENT BADGE REQUEST (Shown ONLY if NOT yet verified)
+            if (!user.isKzynovexVerified && !user.isAdmin) ...[
+              _buildStudentVerificationCard(
+                context,
+                ref,
+                user,
+                verificationReqs,
+              ),
+              const SizedBox(height: 14),
+            ],
+
+            // THEMES & COSMETICS STORE + NOTE BOUNTIES SHORTCUTS
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CosmeticsStoreScreen(),
+                      ),
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: palette.cardSurface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: palette.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: palette.primarySoft,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(Icons.palette_rounded,
+                                size: 18, color: palette.primary),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Themes & Sounds',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: palette.textPrimary,
+                                  ),
+                                ),
+                                Text(
+                                  cosmetics.activeTheme.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: palette.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NoteBountiesScreen(),
+                      ),
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: palette.cardSurface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: palette.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.warningBg,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.volunteer_activism_rounded,
+                              size: 18,
+                              color: AppColors.warning,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Note Bounties',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: palette.textPrimary,
+                                  ),
+                                ),
+                                Text(
+                                  'Escrow help',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: palette.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
             // CLOUD & OFFLINE SYNC CARD
             _buildCloudSyncCard(context, ref),
             const SizedBox(height: 18),
@@ -280,31 +426,31 @@ class ProfileScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: palette.cardSurface,
                 borderRadius: BorderRadius.circular(AppRadii.card),
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: palette.border),
                 boxShadow: AppShadows.card,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    children: const [
+                    children: [
                       Icon(Icons.alarm_rounded,
-                          size: 18, color: AppColors.primary),
-                      SizedBox(width: 8),
+                          size: 18, color: palette.primary),
+                      const SizedBox(width: 8),
                       Text(
                         'Class Alert Lead-Time',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.textPrimary,
+                          color: palette.textPrimary,
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'Receive scheduled notifications before your lecture begins.',
                     style:
                         TextStyle(fontSize: 12, color: AppColors.textSecondary),
@@ -336,7 +482,7 @@ class ProfileScreen extends ConsumerWidget {
                               decoration: BoxDecoration(
                                 color: isSelected
                                     ? AppColors.primary
-                                    : const Color(0xFFF8FAFC),
+                                    : AppColors.surfaceSubtle,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                   color: isSelected
@@ -440,10 +586,10 @@ class ProfileScreen extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       'Configure weekly timetables, add/edit courses, broadcast lecture cancellations or room shifts, and manage moderation.',
                       style: TextStyle(
-                        color: Color(0xFFCBD5E1),
+                        color: AppColors.borderStrong,
                         fontSize: 12,
                         height: 1.4,
                       ),
@@ -616,7 +762,7 @@ class ProfileScreen extends ConsumerWidget {
                         label: const Text('Open Full Admin Console'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: AppColors.primary,
+                          foregroundColor: AppColors.secondary,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -638,7 +784,7 @@ class ProfileScreen extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Admin Moderation Queue',
                     style: TextStyle(
                       fontSize: 18,
@@ -651,7 +797,7 @@ class ProfileScreen extends ConsumerWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
+                      color: AppColors.warningBg,
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -671,11 +817,11 @@ class ProfileScreen extends ConsumerWidget {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.cardSurface,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: AppColors.border),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
                       'Mod Queue is clean! All student submissions reviewed.',
                       style: TextStyle(color: AppColors.textSecondary),
@@ -713,6 +859,8 @@ class ProfileScreen extends ConsumerWidget {
                   _ModQueueOverrideCard(
                     dailyOverride: ov,
                     subjects: subjects,
+                    slots: slots,
+                    users: users,
                     onApprove: () {
                       ref
                           .read(dailyOverridesProvider.notifier)
@@ -740,7 +888,7 @@ class ProfileScreen extends ConsumerWidget {
             // CLASS LEADERBOARD
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: const [
+              children: [
                 Text(
                   'Academic Leaderboard',
                   style: TextStyle(
@@ -767,15 +915,15 @@ class ProfileScreen extends ConsumerWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.cardSurface,
                   borderRadius: BorderRadius.circular(AppRadii.card),
                   border: Border.all(color: AppColors.border),
                   boxShadow: AppShadows.card,
                 ),
                 child: Column(
-                  children: const [
+                  children: [
                     Icon(Icons.emoji_events_outlined,
-                        size: 36, color: Color(0xFFCBD5E1)),
+                        size: 36, color: AppColors.borderStrong),
                     SizedBox(height: 8),
                     Text(
                       'No Contributors Ranked Yet',
@@ -797,7 +945,7 @@ class ProfileScreen extends ConsumerWidget {
             else
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.cardSurface,
                   borderRadius: BorderRadius.circular(AppRadii.card),
                   border: Border.all(color: AppColors.border),
                   boxShadow: AppShadows.card,
@@ -836,7 +984,7 @@ class ProfileScreen extends ConsumerWidget {
                           radius: 16,
                           backgroundColor: isTop3
                               ? AppColors.primarySoft
-                              : const Color(0xFFF1F5F9),
+                              : AppColors.surfaceMuted,
                           child: Text(
                             entry.name[0],
                             style: TextStyle(
@@ -862,7 +1010,7 @@ class ProfileScreen extends ConsumerWidget {
                                       entry.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w700,
                                         color: AppColors.textPrimary,
@@ -871,14 +1019,14 @@ class ProfileScreen extends ConsumerWidget {
                                   ),
                                   if (entry.isKzynovexVerified) ...[
                                     const SizedBox(width: 4),
-                                    const Icon(Icons.verified_rounded,
+                                    Icon(Icons.verified_rounded,
                                         size: 14, color: AppColors.primary),
                                   ],
                                 ],
                               ),
                               if (isTop3) ...[
                                 const SizedBox(height: 2),
-                                const Text(
+                                Text(
                                   'Top Contributor',
                                   style: TextStyle(
                                     fontSize: 10,
@@ -894,7 +1042,7 @@ class ProfileScreen extends ConsumerWidget {
                         // Credits
                         Text(
                           '${entry.credits} pts',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
@@ -918,7 +1066,7 @@ class ProfileScreen extends ConsumerWidget {
                 AppConfig.isSupabaseConfigured
                     ? 'Connected to Live Supabase'
                     : 'Running in Local Offline Demo Mode',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   color: AppColors.textSecondary,
                   fontWeight: FontWeight.w500,
@@ -939,7 +1087,7 @@ class ProfileScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.circular(AppRadii.card),
                 border: Border.all(color: AppColors.border),
                 boxShadow: AppShadows.card,
@@ -952,7 +1100,7 @@ class ProfileScreen extends ConsumerWidget {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEFF6FF),
+                          color: AppColors.blueBg,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: const Icon(
@@ -962,7 +1110,7 @@ class ProfileScreen extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      const Expanded(
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -995,27 +1143,27 @@ class ProfileScreen extends ConsumerWidget {
                   _buildFutureFeatureItem(
                     icon: Icons.cloud_upload_outlined,
                     iconColor: const Color(0xFF2563EB),
-                    iconBg: const Color(0xFFEFF6FF),
+                    iconBg: AppColors.blueBg,
                     title: 'Community Note Uploads',
                     badge: 'Coming Soon',
                     badgeColor: const Color(0xFF2563EB),
-                    badgeBg: const Color(0xFFDBEAFE),
+                    badgeBg: AppColors.blueBorder,
                     description:
                         'Student contribution system for uploading lecture slides, notes, and past papers with +50 ⚡ reward credits. Currently disabled so students have a clean, verified reading experience.',
                   ),
                   const SizedBox(height: 12),
 
-                  // Feature 2: Bunk Radar
+                  // Feature 2: Bunk Radar (Now Live)
                   _buildFutureFeatureItem(
                     icon: Icons.radar_rounded,
-                    iconColor: const Color(0xFFD97706),
-                    iconBg: const Color(0xFFFEF3C7),
+                    iconColor: const Color(0xFF059669),
+                    iconBg: AppColors.successBgStrong,
                     title: 'Bunk Radar & Attendance Predictor',
-                    badge: 'Under Fine-Tuning',
-                    badgeColor: const Color(0xFFB45309),
-                    badgeBg: const Color(0xFFFDE68A),
+                    badge: 'Live Now',
+                    badgeColor: AppColors.successText,
+                    badgeBg: AppColors.successBorder,
                     description:
-                        'Smart algorithm calculating exactly how many lectures you can safely bunk without dropping below the 75% threshold, with streak tracking.',
+                        'Real-time calculator showing exactly how many lectures you can safely miss or must attend to stay above 75%, with quick Present/Absent buttons on alarms & lectures.',
                   ),
                   const SizedBox(height: 12),
 
@@ -1023,11 +1171,11 @@ class ProfileScreen extends ConsumerWidget {
                   _buildFutureFeatureItem(
                     icon: Icons.task_alt_rounded,
                     iconColor: const Color(0xFF059669),
-                    iconBg: const Color(0xFFD1FAE5),
+                    iconBg: AppColors.successBgStrong,
                     title: 'Assignment Submissions & Feedback',
                     badge: 'Planned',
-                    badgeColor: const Color(0xFF047857),
-                    badgeBg: const Color(0xFFA7F3D0),
+                    badgeColor: AppColors.successText,
+                    badgeBg: AppColors.successBorder,
                     description:
                         'Direct submission portal for homework solutions, professor rubric scoring, and feedback notifications.',
                   ),
@@ -1110,7 +1258,7 @@ class ProfileScreen extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+        color: AppColors.surfaceSubtle,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
       ),
@@ -1135,7 +1283,7 @@ class ProfileScreen extends ConsumerWidget {
                     Expanded(
                       child: Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary,
@@ -1164,7 +1312,7 @@ class ProfileScreen extends ConsumerWidget {
                 const SizedBox(height: 4),
                 Text(
                   description,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     color: AppColors.textSecondary,
                     height: 1.35,
@@ -1186,7 +1334,7 @@ class ProfileScreen extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(
           color: updateState.isUpdateAvailable
@@ -1206,7 +1354,7 @@ class ProfileScreen extends ConsumerWidget {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: updateState.isUpdateAvailable
-                      ? const Color(0xFFFEF3C7)
+                      ? AppColors.warningBg
                       : AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -1227,7 +1375,7 @@ class ProfileScreen extends ConsumerWidget {
                   children: [
                     Row(
                       children: [
-                        const Text(
+                        Text(
                           'App Version & Updates',
                           style: TextStyle(
                             fontSize: 15,
@@ -1241,13 +1389,13 @@ class ProfileScreen extends ConsumerWidget {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFEF3C7),
+                              color: AppColors.warningBg,
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: const Text(
+                            child: Text(
                               'UPDATE AVAILABLE',
                               style: TextStyle(
-                                color: Color(0xFFB45309),
+                                color: AppColors.warningText,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -1257,7 +1405,7 @@ class ProfileScreen extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    const Text(
+                    Text(
                       'Titan Portal OTA Distribution • ${AppConfig.appPackageName}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1277,7 +1425,7 @@ class ProfileScreen extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
+              color: AppColors.surfaceSubtle,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border),
             ),
@@ -1299,9 +1447,9 @@ class ProfileScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFFBEB),
+                color: AppColors.urgentBg,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFDE68A)),
+                border: Border.all(color: AppColors.warningBorder),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1313,10 +1461,10 @@ class ProfileScreen extends ConsumerWidget {
                       const SizedBox(width: 6),
                       Text(
                         'v${updateState.updateInfo!.versionName} (Build ${updateState.updateInfo!.versionCode}) Available',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF92400E),
+                          color: AppColors.warningTextDeep,
                         ),
                       ),
                     ],
@@ -1328,9 +1476,9 @@ class ProfileScreen extends ConsumerWidget {
                         : 'New release with improvements and updates.',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: Color(0xFFB45309),
+                      color: AppColors.warningText,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -1423,10 +1571,10 @@ class ProfileScreen extends ConsumerWidget {
               // Server Host Settings Button
               IconButton(
                 tooltip: 'Update Server Settings',
-                icon: const Icon(Icons.dns_rounded, size: 20, color: AppColors.textSecondary),
+                icon: Icon(Icons.dns_rounded, size: 20, color: AppColors.textSecondary),
                 onPressed: () => _showUpdateHostDialog(context),
                 style: IconButton.styleFrom(
-                  backgroundColor: const Color(0xFFF1F5F9),
+                  backgroundColor: AppColors.surfaceMuted,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -1443,14 +1591,14 @@ class ProfileScreen extends ConsumerWidget {
               final host = snapshot.data ?? AppConfig.defaultUpdateBaseUrl;
               return Row(
                 children: [
-                  const Icon(Icons.link_rounded, size: 12, color: AppColors.textSecondary),
+                  Icon(Icons.link_rounded, size: 12, color: AppColors.textSecondary),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       'API Host: $host',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w500,
@@ -1471,7 +1619,7 @@ class ProfileScreen extends ConsumerWidget {
       children: [
         Text(
           label.toUpperCase(),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.w700,
             color: AppColors.textSecondary,
@@ -1481,7 +1629,7 @@ class ProfileScreen extends ConsumerWidget {
         const SizedBox(height: 2),
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w800,
             color: AppColors.textPrimary,
@@ -1506,7 +1654,7 @@ class ProfileScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Specify the base URL of your Titan Portal Update Manager API instance.',
               style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
             ),
@@ -1516,10 +1664,10 @@ class ProfileScreen extends ConsumerWidget {
               decoration: InputDecoration(
                 hintText: 'e.g. http://titan.portal.kzynovex.online',
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
@@ -1559,10 +1707,10 @@ class ProfileScreen extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(
-          color: hasPending ? const Color(0xFFFDE68A) : AppColors.border,
+          color: hasPending ? AppColors.warningBorder : AppColors.border,
           width: hasPending ? 1.5 : 1.0,
         ),
         boxShadow: AppShadows.card,
@@ -1576,7 +1724,7 @@ class ProfileScreen extends ConsumerWidget {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: hasPending
-                      ? const Color(0xFFFEF3C7)
+                      ? AppColors.warningBg
                       : AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -1593,7 +1741,7 @@ class ProfileScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Cloud Sync & Offline Queue',
                       style: TextStyle(
                         fontSize: 14,
@@ -1622,13 +1770,13 @@ class ProfileScreen extends ConsumerWidget {
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: hasPending
-                      ? const Color(0xFFFEF3C7)
-                      : const Color(0xFFF0FDF4),
+                      ? AppColors.warningBg
+                      : AppColors.successBg,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
                     color: hasPending
-                        ? const Color(0xFFFDE68A)
-                        : const Color(0xFFBBF7D0),
+                        ? AppColors.warningBorder
+                        : AppColors.successBorder,
                   ),
                 ),
                 child: Text(
@@ -1637,7 +1785,7 @@ class ProfileScreen extends ConsumerWidget {
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                     color: hasPending
-                        ? const Color(0xFFB45309)
+                        ? AppColors.warningText
                         : AppColors.success,
                   ),
                 ),
@@ -1648,9 +1796,9 @@ class ProfileScreen extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
+              color: AppColors.surfaceSubtle,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppColors.border),
             ),
             child: Row(
               children: [
@@ -1658,7 +1806,7 @@ class ProfileScreen extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'LAST SYNCED',
                         style: TextStyle(
                           fontSize: 9,
@@ -1670,7 +1818,7 @@ class ProfileScreen extends ConsumerWidget {
                       const SizedBox(height: 2),
                       Text(
                         lastSyncText,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary,
@@ -1689,7 +1837,7 @@ class ProfileScreen extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'BACKEND STATUS',
                         style: TextStyle(
                           fontSize: 9,
@@ -1802,7 +1950,7 @@ class ProfileScreen extends ConsumerWidget {
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 11,
             color: AppColors.textSecondary,
             fontWeight: FontWeight.w600,
@@ -1833,7 +1981,7 @@ class _ModQueueResourceCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
@@ -1842,10 +1990,10 @@ class _ModQueueResourceCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.note_add_rounded,
+              Icon(Icons.note_add_rounded,
                   size: 16, color: AppColors.primary),
               const SizedBox(width: 6),
-              const Text(
+              Text(
                 'Note Submission',
                 style: TextStyle(
                   fontSize: 11,
@@ -1856,7 +2004,7 @@ class _ModQueueResourceCard extends StatelessWidget {
               const Spacer(),
               Text(
                 'By ${resource.uploaderName}',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 11, color: AppColors.textSecondary),
               ),
             ],
@@ -1864,7 +2012,7 @@ class _ModQueueResourceCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             resource.title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
               color: AppColors.textPrimary,
@@ -1913,22 +2061,64 @@ class _ModQueueResourceCard extends StatelessWidget {
 class _ModQueueOverrideCard extends StatelessWidget {
   final DailyOverrideModel dailyOverride;
   final List<SubjectModel> subjects;
+  final List<TimetableSlotModel> slots;
+  final List<UserModel> users;
   final VoidCallback onApprove;
   final VoidCallback onReject;
 
   const _ModQueueOverrideCard({
     required this.dailyOverride,
     required this.subjects,
+    required this.slots,
+    required this.users,
     required this.onApprove,
     required this.onReject,
   });
 
+  String _resolveReporterLabel() {
+    if (dailyOverride.reportedByName != null &&
+        dailyOverride.reportedByName!.trim().isNotEmpty) {
+      return dailyOverride.reportedByName!.trim();
+    }
+    final reporterId = dailyOverride.reportedBy;
+    if (reporterId != null && reporterId.isNotEmpty) {
+      final normReporter = UuidUtil.fromString(reporterId);
+      final match = users.cast<UserModel?>().firstWhere(
+            (u) =>
+                u != null &&
+                (u.id == reporterId || UuidUtil.fromString(u.id) == normReporter),
+            orElse: () => null,
+          );
+      if (match != null) {
+        final roll = match.rollNo?.trim();
+        return (roll != null && roll.isNotEmpty)
+            ? '${match.name} ($roll)'
+            : match.name;
+      }
+      return 'User #${reporterId.substring(0, reporterId.length.clamp(0, 8))}';
+    }
+    return 'Unknown Student';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final targetSlotUuid = UuidUtil.fromString(dailyOverride.slotId);
+    final slot = slots.cast<TimetableSlotModel?>().firstWhere(
+          (s) =>
+              s != null &&
+              (s.id == dailyOverride.slotId ||
+                  UuidUtil.fromString(s.id) == targetSlotUuid),
+          orElse: () => null,
+        );
+    final subject = slot != null
+        ? resolveSubjectById(subjects, slot.subjectId)
+        : null;
+    final reporterLabel = _resolveReporterLabel();
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
@@ -1940,21 +2130,47 @@ class _ModQueueOverrideCard extends StatelessWidget {
               const Icon(Icons.edit_calendar_rounded,
                   size: 16, color: AppColors.warning),
               const SizedBox(width: 6),
-              Text(
-                'Schedule Report (${dailyOverride.status.label})',
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.warning,
+              Expanded(
+                child: Text(
+                  subject != null
+                      ? '${subject.code} - ${subject.name} (${dailyOverride.status.label})'
+                      : 'Schedule Report (${dailyOverride.status.label})',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.warning,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.person_outline_rounded,
+                  size: 14, color: AppColors.primary),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Requested by: $reporterLabel',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
           if (dailyOverride.rescheduledDate != null)
             Text(
               'Rescheduled Date: ${dailyOverride.rescheduledDate!.year}-${dailyOverride.rescheduledDate!.month.toString().padLeft(2, '0')}-${dailyOverride.rescheduledDate!.day.toString().padLeft(2, '0')}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: AppColors.primary,
@@ -1972,7 +2188,7 @@ class _ModQueueOverrideCard extends StatelessWidget {
           if (dailyOverride.actualRoom != null)
             Text(
               'New Room Reported: ${dailyOverride.actualRoom}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: AppColors.textPrimary,
@@ -1981,7 +2197,7 @@ class _ModQueueOverrideCard extends StatelessWidget {
           if (dailyOverride.topicCovered != null)
             Text(
               'Note: ${dailyOverride.topicCovered}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 color: AppColors.textSecondary,
               ),
@@ -2044,11 +2260,11 @@ void _openEditProfileDialog(
               color: AppColors.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.edit_rounded,
+            child: Icon(Icons.edit_rounded,
                 color: AppColors.primary, size: 20),
           ),
           const SizedBox(width: 10),
-          const Text(
+          Text(
             'Edit Profile',
             style: TextStyle(
               fontSize: 18,
@@ -2063,7 +2279,7 @@ void _openEditProfileDialog(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Full Name',
               style: TextStyle(
                 fontSize: 12,
@@ -2076,26 +2292,26 @@ void _openEditProfileDialog(
               controller: nameController,
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide:
-                      const BorderSide(color: AppColors.primary, width: 1.5),
+                      BorderSide(color: AppColors.primary, width: 1.5),
                 ),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Roll Number',
               style: TextStyle(
                 fontSize: 12,
@@ -2109,26 +2325,26 @@ void _openEditProfileDialog(
               decoration: InputDecoration(
                 hintText: 'e.g. 23-SE-402',
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide:
-                      const BorderSide(color: AppColors.primary, width: 1.5),
+                      BorderSide(color: AppColors.primary, width: 1.5),
                 ),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Email Address',
               style: TextStyle(
                 fontSize: 12,
@@ -2142,19 +2358,19 @@ void _openEditProfileDialog(
               keyboardType: TextInputType.emailAddress,
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide:
-                      const BorderSide(color: AppColors.primary, width: 1.5),
+                      BorderSide(color: AppColors.primary, width: 1.5),
                 ),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -2167,7 +2383,7 @@ void _openEditProfileDialog(
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancel',
+          child: Text('Cancel',
               style: TextStyle(color: AppColors.textSecondary)),
         ),
         FilledButton(
@@ -2212,7 +2428,7 @@ Widget _buildAlarmSettingsCard(
   return Container(
     padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: AppColors.cardSurface,
       borderRadius: BorderRadius.circular(AppRadii.card),
       border: Border.all(
         color: alertMode == AlertMode.ring
@@ -2231,8 +2447,8 @@ Widget _buildAlarmSettingsCard(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: alertMode == AlertMode.ring
-                    ? const Color(0xFFEEF2FF)
-                    : const Color(0xFFF1F5F9),
+                    ? AppColors.infoBg
+                    : AppColors.surfaceMuted,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -2252,7 +2468,7 @@ Widget _buildAlarmSettingsCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Lecture Alarm Clock',
                     style: TextStyle(
                       fontSize: 16,
@@ -2267,7 +2483,7 @@ Widget _buildAlarmSettingsCard(
                         : (alertMode == AlertMode.vibrate
                             ? 'Vibrates before classes (Silent)'
                             : 'Alarms silenced'),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       color: AppColors.textSecondary,
                     ),
@@ -2280,7 +2496,7 @@ Widget _buildAlarmSettingsCard(
               decoration: BoxDecoration(
                 color: alertMode != AlertMode.silent
                     ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                    : const Color(0xFF94A3B8).withValues(alpha: 0.15),
+                    : AppColors.textSecondary.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -2290,7 +2506,7 @@ Widget _buildAlarmSettingsCard(
                   fontWeight: FontWeight.w800,
                   color: alertMode != AlertMode.silent
                       ? const Color(0xFF059669)
-                      : const Color(0xFF64748B),
+                      : AppColors.textSecondary,
                 ),
               ),
             ),
@@ -2339,7 +2555,7 @@ Widget _buildAlarmSettingsCard(
         const SizedBox(height: 16),
 
         // Lead time selection
-        const Text(
+        Text(
           'Ring Alarm Before Class Starts:',
           style: TextStyle(
             fontSize: 12,
@@ -2424,6 +2640,246 @@ Widget _buildAlarmSettingsCard(
             height: 1.3,
           ),
         ),
+        const SizedBox(height: 14),
+        Builder(
+          builder: (context) {
+            final cosmetics = ref.watch(cosmeticsProvider);
+            return Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSubtle,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.graphic_eq_rounded,
+                          size: 16, color: AppColors.primary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Alarm: ${cosmetics.activeAlarmSound.name} • Notif: ${cosmetics.activeNotificationSound.name}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CosmeticsStoreScreen(),
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          'Change',
+                          style: TextStyle(
+                              fontSize: 11.5, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.touch_app_rounded,
+                          size: 15, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Soft Button Tap Sound',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Switch.adaptive(
+                        value: cosmetics.tapSoundEnabled,
+                        onChanged: (v) => ref
+                            .read(cosmeticsProvider.notifier)
+                            .setTapSoundEnabled(v),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildStudentVerificationCard(
+  BuildContext context,
+  WidgetRef ref,
+  UserModel user,
+  List<StudentVerificationRequestModel> requests,
+) {
+  final normId = UuidUtil.fromString(user.id);
+  final existing = requests.cast<StudentVerificationRequestModel?>().firstWhere(
+        (r) =>
+            r != null &&
+            ((r.userId.isNotEmpty && UuidUtil.fromString(r.userId) == normId) ||
+                (user.email.isNotEmpty &&
+                    r.email.toLowerCase() == user.email.toLowerCase())),
+        orElse: () => null,
+      );
+
+  final isPending = existing != null && existing.isPending;
+  final isRejected = existing != null && existing.isRejected;
+
+  return Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: AppColors.urgentBg,
+      borderRadius: BorderRadius.circular(AppRadii.card),
+      border: Border.all(color: AppColors.warning.withValues(alpha: 0.45)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.verified_user_outlined,
+                color: AppColors.warning, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Get Your Verified Student Badge',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.warningTextDeep,
+                ),
+              ),
+            ),
+            if (isPending)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.warningBorder,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'PENDING',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.warningTextDeep,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          isPending
+              ? 'Your request for ${existing.name} (${existing.rollNo}) is waiting for Admin verification. Credits remain locked until approved.'
+              : (isRejected
+                  ? 'Rejected: ${existing.rejectionReason ?? "Details mismatch."}. Update your Name & Roll No to resubmit.'
+                  : 'Your ${user.credits} ⚡ welcome credits are locked until verified. Request Admin verification with your real Name & Roll No to spend credits on Cosmetics or Note Bounties.'),
+          style: TextStyle(
+            fontSize: 11.5,
+            color: AppColors.warningTextDeep,
+            height: 1.35,
+          ),
+        ),
+        if (!isPending) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () async {
+                final nameCtrl = TextEditingController(text: user.name);
+                final rollCtrl = TextEditingController(text: user.rollNo ?? '');
+                await showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Request Verified Student Badge'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller: nameCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Full University Name',
+                            prefixIcon: Icon(Icons.person_outline_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: rollCtrl,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'University Roll No (e.g. 23-SE-402)',
+                            prefixIcon: Icon(Icons.badge_outlined),
+                          ),
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        onPressed: () async {
+                          final res = await ref
+                              .read(studentVerificationRequestsProvider.notifier)
+                              .submitRequest(
+                                name: nameCtrl.text,
+                                rollNo: rollCtrl.text,
+                              );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(res.message),
+                              backgroundColor: res.success
+                                  ? AppColors.success
+                                  : AppColors.danger,
+                            ),
+                          );
+                        },
+                        child: const Text('Submit to Admin'),
+                      ),
+                    ],
+                  ),
+                );
+                nameCtrl.dispose();
+                rollCtrl.dispose();
+              },
+              icon: const Icon(Icons.verified_rounded, size: 17),
+              label: Text(
+                isRejected
+                    ? 'Resubmit Name & Roll No'
+                    : 'Request Verified Badge',
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFD97706),
+                minimumSize: const Size(0, 40),
+              ),
+            ),
+          ),
+        ],
       ],
     ),
   );

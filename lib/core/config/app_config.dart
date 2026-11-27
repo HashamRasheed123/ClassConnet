@@ -88,8 +88,8 @@ class AppConfig {
       supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty;
 
   /// Application Versioning & Identity
-  static const String appVersion = '1.0.5';
-  static const int appVersionCode = 6;
+  static const String appVersion = '1.0.6';
+  static const int appVersionCode = 7;
   static const String appPackageName = 'com.softwareclass.softwareclass';
   static const String appBuildChannel = 'Signed Release';
 

@@ -70,8 +70,9 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Stack(
           children: [
@@ -92,7 +93,7 @@ class _SplashScreenState extends State<SplashScreen>
                           borderRadius: BorderRadius.circular(26),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF6366F1).withValues(alpha: 0.35),
+                              color: AppColors.primary.withValues(alpha: 0.35),
                               blurRadius: 32,
                               offset: const Offset(0, 12),
                             ),
@@ -107,7 +108,7 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                       ),
                       const SizedBox(height: 28),
-                      const Text(
+                      Text(
                         KzynovexBranding.appName,
                         style: TextStyle(
                           fontSize: 28,
@@ -124,7 +125,7 @@ class _SplashScreenState extends State<SplashScreen>
                           color: AppColors.primarySoft,
                           borderRadius: BorderRadius.circular(999),
                         ),
-                        child: const Text(
+                        child: Text(
                           'ACADEMIC COMPANION',
                           style: TextStyle(
                             fontSize: 11,

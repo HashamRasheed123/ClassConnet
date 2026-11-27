@@ -136,7 +136,7 @@ class _AssignmentScannerScreenState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Could not open camera on this device. If camera access is restricted or not available, you can choose assignment pages directly from your Gallery or Files.',
               style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
             ),
@@ -144,13 +144,13 @@ class _AssignmentScannerScreenState
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: AppColors.surfaceSubtle,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppColors.border),
               ),
               child: Text(
                 'Detail: $error',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 10, color: AppColors.textSecondary),
               ),
             ),
@@ -223,7 +223,7 @@ class _AssignmentScannerScreenState
             ),
             content: Text(
               'Total ${_photos.length} pages captured so far.\nWould you like to snap the next page now?',
-              style: const TextStyle(color: AppColors.textSecondary),
+              style: TextStyle(color: AppColors.textSecondary),
             ),
             actions: [
               TextButton(
@@ -374,7 +374,7 @@ class _AssignmentScannerScreenState
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -394,7 +394,7 @@ class _AssignmentScannerScreenState
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFCBD5E1),
+                      color: AppColors.borderStrong,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -410,7 +410,7 @@ class _AssignmentScannerScreenState
                           color: AppColors.primary.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(Icons.picture_as_pdf_rounded,
+                        child: Icon(Icons.picture_as_pdf_rounded,
                             color: AppColors.primary, size: 20),
                       ),
                       const SizedBox(width: 12),
@@ -422,7 +422,7 @@ class _AssignmentScannerScreenState
                               title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
                                 color: AppColors.textPrimary,
@@ -430,7 +430,7 @@ class _AssignmentScannerScreenState
                             ),
                             Text(
                               'Student: $studentName • Roll: $rollNo • ${_photos.length} pages',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
                                 color: AppColors.textSecondary,
                               ),
@@ -445,14 +445,14 @@ class _AssignmentScannerScreenState
                     ],
                   ),
                 ),
-                const Divider(height: 1, color: AppColors.border),
+                Divider(height: 1, color: AppColors.border),
 
                 // Privacy Indicator Banner
                 Container(
                   width: double.infinity,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  color: const Color(0xFFF0FDF4),
+                  color: AppColors.successBg,
                   child: Row(
                     children: const [
                       Icon(Icons.shield_rounded,
@@ -477,8 +477,8 @@ class _AssignmentScannerScreenState
                   child: PdfPreview(
                     build: (format) => pdfBytes,
                     useActions: false, // We provide custom styled actions
-                    scrollViewDecoration: const BoxDecoration(
-                      color: Color(0xFFF1F5F9),
+                    scrollViewDecoration: BoxDecoration(
+                      color: AppColors.surfaceMuted,
                     ),
                   ),
                 ),
@@ -487,7 +487,7 @@ class _AssignmentScannerScreenState
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.cardSurface,
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.05),
@@ -510,7 +510,7 @@ class _AssignmentScannerScreenState
                           label: const Text('Share PDF'),
                           style: OutlinedButton.styleFrom(
                             minimumSize: const Size(0, 48),
-                            side: const BorderSide(color: AppColors.primary),
+                            side: BorderSide(color: AppColors.primary),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -580,7 +580,7 @@ class _AssignmentScannerScreenState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Your assignment PDF was compiled and saved locally on your device storage:',
               style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
             ),
@@ -588,13 +588,13 @@ class _AssignmentScannerScreenState
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: AppColors.surfaceSubtle,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppColors.border),
               ),
               child: SelectableText(
                 path,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   fontFamily: 'monospace',
                   color: AppColors.textPrimary,
@@ -606,9 +606,9 @@ class _AssignmentScannerScreenState
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF0FDF4),
+                  color: AppColors.successBg,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                  border: Border.all(color: AppColors.successBorder),
                 ),
                 child: Row(
                   children: [
@@ -690,11 +690,11 @@ class _AssignmentScannerScreenState
                 color: AppColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.badge_rounded,
+              child: Icon(Icons.badge_rounded,
                   color: AppColors.primary, size: 20),
             ),
             const SizedBox(width: 10),
-            const Text(
+            Text(
               'Student Details',
               style: TextStyle(
                 fontSize: 17,
@@ -708,12 +708,12 @@ class _AssignmentScannerScreenState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'This name and roll number will appear on all your generated assignment PDFs. It is saved locally on your device.',
               style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'Student Name',
               style: TextStyle(
                 fontSize: 12,
@@ -727,17 +727,17 @@ class _AssignmentScannerScreenState
               decoration: InputDecoration(
                 hintText: 'e.g. Rayyan',
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Roll Number',
               style: TextStyle(
                 fontSize: 12,
@@ -751,10 +751,10 @@ class _AssignmentScannerScreenState
               decoration: InputDecoration(
                 hintText: 'e.g. 23-SE-402',
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
+                fillColor: AppColors.surfaceSubtle,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.border),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -765,7 +765,7 @@ class _AssignmentScannerScreenState
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel',
+            child: Text('Cancel',
                 style: TextStyle(color: AppColors.textSecondary)),
           ),
           FilledButton(
@@ -799,7 +799,7 @@ class _AssignmentScannerScreenState
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? AppColors.danger : AppColors.textPrimary,
+        backgroundColor: isError ? AppColors.danger : AppColors.snackBarBg,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ),
@@ -813,23 +813,24 @@ class _AssignmentScannerScreenState
   @override
   Widget build(BuildContext context) {
     try {
+      Theme.of(context);
       final user = ref.watch(currentUserProvider);
       final subjects = ref.watch(subjectsProvider);
 
       return Scaffold(
-        backgroundColor: const Color(0xFFF8FAFC),
+        backgroundColor: AppColors.background,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: AppColors.surface,
           elevation: 0,
           surfaceTintColor: Colors.transparent,
           leading: IconButton(
             icon:
-                const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
+                Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
             onPressed: () => Navigator.pop(context),
           ),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
+            children: [
               Text(
                 'Assignment PDF Maker',
                 style: TextStyle(
@@ -854,9 +855,9 @@ class _AssignmentScannerScreenState
               margin: const EdgeInsets.only(right: 14),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
+                color: AppColors.successBg,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
+                border: Border.all(color: AppColors.successBorder),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -903,8 +904,8 @@ class _AssignmentScannerScreenState
         bottomNavigationBar: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
-            border: const Border(top: BorderSide(color: AppColors.border)),
+            color: AppColors.cardSurface,
+            border: Border(top: BorderSide(color: AppColors.border)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -923,13 +924,13 @@ class _AssignmentScannerScreenState
                     children: [
                       Text(
                         '${_photos.length} ${_photos.length == 1 ? 'Page' : 'Pages'} Ready',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary,
                         ),
                       ),
-                      const Text(
+                      Text(
                         'Header + Auto Portrait/Landscape',
                         style: TextStyle(
                           fontSize: 11,
@@ -1024,7 +1025,7 @@ class _AssignmentScannerScreenState
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
         boxShadow: [
@@ -1046,11 +1047,11 @@ class _AssignmentScannerScreenState
                   color: AppColors.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.person_rounded,
+                child: Icon(Icons.person_rounded,
                     color: AppColors.primary, size: 18),
               ),
               const SizedBox(width: 10),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1079,12 +1080,12 @@ class _AssignmentScannerScreenState
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: AppColors.surfaceMuted,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: const [
+                    children: [
                       Icon(Icons.edit_rounded,
                           size: 13, color: AppColors.primary),
                       SizedBox(width: 4),
@@ -1106,9 +1107,9 @@ class _AssignmentScannerScreenState
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
+              color: AppColors.surfaceSubtle,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppColors.border),
             ),
             child: Row(
               children: [
@@ -1116,7 +1117,7 @@ class _AssignmentScannerScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'STUDENT NAME',
                         style: TextStyle(
                           fontSize: 9,
@@ -1128,7 +1129,7 @@ class _AssignmentScannerScreenState
                       const SizedBox(height: 2),
                       Text(
                         user.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary,
@@ -1147,7 +1148,7 @@ class _AssignmentScannerScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'ROLL NUMBER',
                         style: TextStyle(
                           fontSize: 9,
@@ -1159,7 +1160,7 @@ class _AssignmentScannerScreenState
                       const SizedBox(height: 2),
                       Text(
                         rollNo,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: AppColors.primary,
@@ -1185,7 +1186,7 @@ class _AssignmentScannerScreenState
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
@@ -1195,10 +1196,10 @@ class _AssignmentScannerScreenState
           if (pendingAssignments.isNotEmpty) ...[
             Row(
               children: [
-                const Icon(Icons.assignment_turned_in_rounded,
+                Icon(Icons.assignment_turned_in_rounded,
                     size: 16, color: AppColors.primary),
                 const SizedBox(width: 6),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Link to Class Assignment (Auto-fills Title & Course):',
                     style: TextStyle(
@@ -1211,7 +1212,7 @@ class _AssignmentScannerScreenState
                 if (_linkedAssignment != null)
                   InkWell(
                     onTap: () => setState(() => _linkedAssignment = null),
-                    child: const Text(
+                    child: Text(
                       'Unlink',
                       style: TextStyle(
                         fontSize: 11,
@@ -1256,11 +1257,11 @@ class _AssignmentScannerScreenState
               ),
             ),
             const SizedBox(height: 12),
-            const Divider(height: 1, color: AppColors.border),
+            Divider(height: 1, color: AppColors.border),
             const SizedBox(height: 12),
           ],
           Row(
-            children: const [
+            children: [
               Icon(Icons.title_rounded, size: 18, color: AppColors.textPrimary),
               SizedBox(width: 8),
               Text(
@@ -1280,19 +1281,19 @@ class _AssignmentScannerScreenState
             decoration: InputDecoration(
               hintText: 'e.g. Software Architecture - Assignment 2',
               filled: true,
-              fillColor: const Color(0xFFF8FAFC),
+              fillColor: AppColors.surfaceSubtle,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.border),
+                borderSide: BorderSide(color: AppColors.border),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.border),
+                borderSide: BorderSide(color: AppColors.border),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide:
-                    const BorderSide(color: AppColors.primary, width: 1.5),
+                    BorderSide(color: AppColors.primary, width: 1.5),
               ),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1301,7 +1302,7 @@ class _AssignmentScannerScreenState
           const SizedBox(height: 12),
           // Subject Quick Selector
           if (subjects.isNotEmpty) ...[
-            const Text(
+            Text(
               'Course / Subject (Optional):',
               style: TextStyle(
                 fontSize: 11,
@@ -1351,7 +1352,7 @@ class _AssignmentScannerScreenState
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
@@ -1360,10 +1361,10 @@ class _AssignmentScannerScreenState
         children: [
           Row(
             children: [
-              const Icon(Icons.camera_rounded,
+              Icon(Icons.camera_rounded,
                   size: 18, color: AppColors.textPrimary),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 'Add Document Photos',
                 style: TextStyle(
                   fontSize: 13,
@@ -1393,12 +1394,12 @@ class _AssignmentScannerScreenState
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
+                      color: AppColors.surfaceMuted,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      border: Border.all(color: AppColors.border),
                     ),
                     child: Column(
-                      children: const [
+                      children: [
                         Icon(Icons.photo_camera_rounded,
                             size: 22, color: AppColors.primary),
                         SizedBox(height: 4),
@@ -1431,7 +1432,7 @@ class _AssignmentScannerScreenState
                           color: AppColors.primary.withValues(alpha: 0.3)),
                     ),
                     child: Column(
-                      children: const [
+                      children: [
                         Icon(Icons.burst_mode_rounded,
                             size: 22, color: AppColors.primary),
                         SizedBox(height: 4),
@@ -1458,12 +1459,12 @@ class _AssignmentScannerScreenState
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
+                      color: AppColors.surfaceMuted,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      border: Border.all(color: AppColors.border),
                     ),
                     child: Column(
-                      children: const [
+                      children: [
                         Icon(Icons.photo_library_rounded,
                             size: 22, color: AppColors.textSecondary),
                         SizedBox(height: 4),
@@ -1492,7 +1493,7 @@ class _AssignmentScannerScreenState
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.cardSurface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
         ),
@@ -1501,15 +1502,15 @@ class _AssignmentScannerScreenState
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: AppColors.surfaceSubtle,
                 shape: BoxShape.circle,
                 border: Border.all(color: AppColors.border),
               ),
-              child: const Icon(Icons.document_scanner_rounded,
+              child: Icon(Icons.document_scanner_rounded,
                   size: 36, color: AppColors.textSecondary),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'No Pages Captured Yet',
               style: TextStyle(
                 fontSize: 15,
@@ -1518,7 +1519,7 @@ class _AssignmentScannerScreenState
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Click photos of your assignment pages using Camera, Multi-Snap, or pick from Gallery.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
@@ -1546,7 +1547,7 @@ class _AssignmentScannerScreenState
                     icon: const Icon(Icons.burst_mode_rounded, size: 18),
                     label: const Text('Multi-Snap'),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.primary),
+                      side: BorderSide(color: AppColors.primary),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1558,9 +1559,9 @@ class _AssignmentScannerScreenState
             const SizedBox(height: 8),
             TextButton.icon(
               onPressed: _pickMultipleFromGallery,
-              icon: const Icon(Icons.photo_library_rounded,
+              icon: Icon(Icons.photo_library_rounded,
                   size: 16, color: AppColors.textSecondary),
-              label: const Text(
+              label: Text(
                 'Or select existing photos from Gallery',
                 style:
                     TextStyle(color: AppColors.textSecondary, fontSize: 12),
@@ -1579,7 +1580,7 @@ class _AssignmentScannerScreenState
           children: [
             Text(
               'Document Pages (${_photos.length})',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w800,
                 color: AppColors.textPrimary,
@@ -1587,7 +1588,7 @@ class _AssignmentScannerScreenState
             ),
             Text(
               'Order: Page 1 to ${_photos.length}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 color: AppColors.textSecondary,
                 fontWeight: FontWeight.w600,
@@ -1609,7 +1610,7 @@ class _AssignmentScannerScreenState
             return Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.cardSurface,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: isFirst ? AppColors.primary : AppColors.border,
@@ -1690,7 +1691,7 @@ class _AssignmentScannerScreenState
                                       AppColors.primary.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'Top Title',
                                   style: TextStyle(
                                     fontSize: 9,
@@ -1720,7 +1721,7 @@ class _AssignmentScannerScreenState
                                     : 'Portrait (${photo.width}x${photo.height})',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 11,
                                   color: AppColors.textSecondary,
                                 ),
@@ -1738,7 +1739,7 @@ class _AssignmentScannerScreenState
                     padding: EdgeInsets.zero,
                     constraints:
                         const BoxConstraints(minWidth: 32, minHeight: 32),
-                    icon: const Icon(Icons.rotate_right_rounded,
+                    icon: Icon(Icons.rotate_right_rounded,
                         size: 20, color: AppColors.textSecondary),
                     onPressed: () => _rotatePhoto(index),
                   ),
@@ -1748,7 +1749,7 @@ class _AssignmentScannerScreenState
                       padding: EdgeInsets.zero,
                       constraints:
                           const BoxConstraints(minWidth: 32, minHeight: 32),
-                      icon: const Icon(Icons.arrow_upward_rounded,
+                      icon: Icon(Icons.arrow_upward_rounded,
                           size: 18, color: AppColors.textSecondary),
                       onPressed: () => _movePhoto(index, index - 1),
                     ),
@@ -1758,7 +1759,7 @@ class _AssignmentScannerScreenState
                       padding: EdgeInsets.zero,
                       constraints:
                           const BoxConstraints(minWidth: 32, minHeight: 32),
-                      icon: const Icon(Icons.arrow_downward_rounded,
+                      icon: Icon(Icons.arrow_downward_rounded,
                           size: 18, color: AppColors.textSecondary),
                       onPressed: () => _movePhoto(index, index + 1),
                     ),

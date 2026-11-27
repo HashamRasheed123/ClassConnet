@@ -41,6 +41,7 @@ class PoweredByKzynovexFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -53,7 +54,7 @@ class PoweredByKzynovexFooter extends StatelessWidget {
               color: AppColors.primary.withValues(alpha: 0.3),
             ),
             const SizedBox(width: 8),
-            const Text(
+            Text(
               'POWERED BY',
               style: TextStyle(
                 fontSize: 10,
@@ -80,14 +81,14 @@ class PoweredByKzynovexFooter extends StatelessWidget {
                 color: AppColors.primarySoft,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.bolt_rounded,
                 size: 14,
                 color: AppColors.primary,
               ),
             ),
             const SizedBox(width: 6),
-            const Text(
+            Text(
               'KZYNOVEX',
               style: TextStyle(
                 fontSize: 18,
@@ -109,11 +110,12 @@ class KzynovexPromoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFECE9F8), width: 1.2),
+        border: Border.all(color: AppColors.border, width: 1.2),
         boxShadow: [
           BoxShadow(
             color: AppColors.primary.withValues(alpha: 0.06),
@@ -163,7 +165,7 @@ class KzynovexPromoCard extends StatelessWidget {
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: const [
+                        children: [
                           Icon(Icons.verified_rounded, size: 13, color: AppColors.primary),
                           SizedBox(width: 5),
                           Text(
@@ -181,7 +183,7 @@ class KzynovexPromoCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 14),
-                const Text(
+                Text(
                   'Engineered by Kzynovex',
                   style: TextStyle(
                     color: AppColors.textPrimary,
@@ -191,7 +193,7 @@ class KzynovexPromoCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'Custom Web, Desktop & Mobile Software Systems built for high performance and modern team velocity.',
                   style: TextStyle(
                     color: AppColors.textSecondary,
